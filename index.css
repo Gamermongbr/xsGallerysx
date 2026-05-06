@@ -1,0 +1,130 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lobster&family=JetBrains+Mono&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #03dac6;
+  --color-primary-variant: #32f0dd;
+  --color-error: #cf6679;
+  --color-heart: #e91e63;
+  
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-lobster: 'Lobster', cursive;
+  --font-mono: 'JetBrains Mono', 'Roboto Mono', monospace;
+}
+
+@layer utilities {
+  @keyframes gradient-x {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  .animate-gradient-x {
+    animation: gradient-x 6s ease infinite;
+  }
+  @keyframes aurora {
+    0% { transform: translate(-30%, -30%) rotate(0deg) scale(1); opacity: 0.3; }
+    33% { transform: translate(30%, 10%) rotate(120deg) scale(1.4); opacity: 0.5; }
+    66% { transform: translate(-10%, 40%) rotate(240deg) scale(0.9); opacity: 0.3; }
+    100% { transform: translate(-30%, -30%) rotate(360deg) scale(1); opacity: 0.3; }
+  }
+  @keyframes shimmer-fast {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .animate-aurora {
+    animation: aurora 15s linear infinite;
+  }
+  .animate-shimmer-fast {
+    animation: shimmer-fast 3s linear infinite;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-[#050505] text-zinc-200 antialiased overflow-x-hidden min-h-screen selection:bg-[#03dac6] selection:text-black;
+  }
+}
+
+@layer utilities {
+  .glow-cyan {
+    box-shadow: 0 0 16px rgba(3, 218, 198, 0.2), inset 0 0 8px rgba(3, 218, 198, 0.1);
+    border-color: rgba(3, 218, 198, 0.3);
+  }
+  .glow-lightblue {
+    box-shadow: 0 0 16px rgba(52, 152, 219, 0.2), inset 0 0 8px rgba(52, 152, 219, 0.1);
+    border-color: rgba(52, 152, 219, 0.3);
+  }
+  .glow-violet {
+    box-shadow: 0 0 16px rgba(155, 89, 182, 0.2), inset 0 0 8px rgba(155, 89, 182, 0.1);
+    border-color: rgba(155, 89, 182, 0.3);
+  }
+  .glow-pink {
+    box-shadow: 0 0 16px rgba(233, 30, 99, 0.2), inset 0 0 8px rgba(233, 30, 99, 0.1);
+    border-color: rgba(233, 30, 99, 0.3);
+  }
+  .glow-red {
+    box-shadow: 0 0 16px rgba(231, 76, 60, 0.2), inset 0 0 8px rgba(231, 76, 60, 0.1);
+    border-color: rgba(231, 76, 60, 0.3);
+  }
+  .glow-gold {
+    box-shadow: 0 0 16px rgba(241, 196, 15, 0.2), inset 0 0 8px rgba(241, 196, 15, 0.1);
+    border-color: rgba(241, 196, 15, 0.3);
+  }
+  
+  .glass-panel {
+    @apply bg-black/40 backdrop-blur-xl border border-white/10 shadow-2xl;
+  }
+}
+
+/* Animations */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-10px); }
+  50% { transform: translateX(10px); }
+  75% { transform: translateX(-10px); }
+}
+
+.animate-shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+/* Ambient Background Glow */
+@keyframes ambient-drift {
+  0% { transform: translateX(-50%) translateY(-50%) scale(1); opacity: 0.1; }
+  50% { transform: translateX(-40%) translateY(-60%) scale(1.1); opacity: 0.15; }
+  100% { transform: translateX(-50%) translateY(-50%) scale(1); opacity: 0.1; }
+}
+
+.ambient-glow {
+  position: fixed;
+  z-index: -1;
+  top: 40%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-50%);
+  background: radial-gradient(circle at center, #03dac6, #9b59b6, transparent 60%);
+  opacity: 0.1;
+  width: 120vw;
+  height: 120vh;
+  pointer-events: none;
+  filter: blur(140px);
+  animation: ambient-drift 15s ease-in-out infinite alternate;
+}
+
+/* Custom Scrollbar for images */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+/* Hide input file */
+.hidden-input {
+  width: 0.1px;
+  height: 0.1px;
+  opacity: 0;
+  overflow: hidden;
+  position: absolute;
+  z-index: -1;
+}
