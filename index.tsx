@@ -199,6 +199,12 @@ const StarRating: React.FC<{ rating: number }> = ({ rating }) => {
     );
 };
 
+const CatIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+        <path d="M22.9 6.2C23.6 5.4 23.3 4 22.2 3.7c-3-.7-6.2 .1-8.5 2.3C13.1 5.8 12.6 5.7 12 5.7s-1.1 .1-1.7 .3c-2.3-2.2-5.5-3-8.5-2.3C.7 4 .4 5.4 1.1 6.2L3.8 9.3c-1.1 1.6-1.8 3.5-1.8 5.6c0 5 4.5 9.1 10 9.1s10-4.1 10-9.1c0-2.1-.7-4-1.8-5.6l2.7-3.1z" />
+    </svg>
+);
+
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'home' | 'profiles' | 'arcade' | 'extra'>('home');
@@ -1234,6 +1240,19 @@ const App: React.FC = () => {
                             <span className={`text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full ${item.status === 'Enabled' ? 'bg-cyan-500/10 text-cyan-400' : 'bg-white/10 text-white'}`}>{item.status}</span>
                         </div>
                     ))}
+                    
+                    <button onClick={() => window.open('https://catbox.moe', '_blank')} className="bg-zinc-900 border border-white/5 p-5 rounded-3xl flex items-center justify-between hover:border-white/20 hover:bg-white/5 transition text-left group">
+                        <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center shrink-0">
+                                <CatIcon className="w-6 h-6 text-white" />
+                            </div>
+                            <div>
+                                <h4 className="text-white font-medium group-hover:text-white transition">Catbox.moe</h4>
+                                <p className="text-xs text-zinc-500 mt-1">Upload images to generate permanent public links</p>
+                            </div>
+                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full bg-white/10 text-white">Open</span>
+                    </button>
                 </div>
             </motion.div>
         )}
@@ -1652,6 +1671,17 @@ const App: React.FC = () => {
                            </div>
                            <button type="submit" disabled={!newImageUrl.trim()} className="w-full py-3 mt-2 rounded-xl bg-white text-black font-semibold hover:bg-pink-500 hover:text-white disabled:opacity-50 transition">Add from URL</button>
                        </form>
+                        <div className="pt-4 mt-2 border-t border-white/10">
+                           <button onClick={() => window.open('https://catbox.moe', '_blank')} className="w-full flex items-center gap-4 p-4 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/30 transition group">
+                               <div className="w-12 h-12 rounded-full bg-white/10 text-white flex items-center justify-center group-hover:scale-110 transition shrink-0">
+                                   <CatIcon className="w-6 h-6"/>
+                               </div>
+                               <div className="text-left">
+                                   <h3 className="text-white font-medium">Get Catbox Link</h3>
+                                   <p className="text-zinc-400 text-sm">Upload to Catbox.moe for a permanent URL</p>
+                               </div>
+                           </button>
+                        </div>
                     </div>
                 </motion.div>
             </motion.div>
