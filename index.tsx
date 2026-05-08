@@ -536,6 +536,7 @@ const App: React.FC = () => {
   const [driveError, setDriveError] = useState<string | null>(null);
   const [driveNextToken, setDriveNextToken] = useState<string | null>(null);
   const [driveSearchQuery, setDriveSearchQuery] = useState('');
+  const [driveAccessToken, setDriveAccessToken] = useState<string | null>(sessionStorage.getItem('google_access_token'));
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -602,6 +603,7 @@ const App: React.FC = () => {
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
         sessionStorage.setItem('google_access_token', credential.accessToken);
+        setDriveAccessToken(credential.accessToken);
         fetchDriveImages(credential.accessToken);
       }
     } catch (error: any) {
@@ -627,6 +629,7 @@ const App: React.FC = () => {
       if (!res.ok) {
         if (res.status === 401) {
             sessionStorage.removeItem('google_access_token');
+            setDriveAccessToken(null);
             throw new Error("Session expired. Please log in again.");
         }
         if (res.status === 403) {
@@ -2938,16 +2941,20 @@ const App: React.FC = () => {
               </button>
               <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><Cloud className="w-6 h-6 text-green-400"/> Google Drive</h2>
               
-              {!googleUser ? (
+              {!googleUser || !driveAccessToken ? (
                 <div className="flex flex-col items-center justify-center flex-1 py-12 text-center">
                   <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center text-white/50 mb-6 transition-transform hover:scale-110">
                     <Cloud className="w-10 h-10" />
                   </div>
-                  <h3 className="text-xl font-bold text-white mb-2">Connect Google Drive</h3>
-                  <p className="text-zinc-400 max-w-sm mx-auto mb-8">Sign in with your Google account to access and import your photos directly into the vault.</p>
+                  <h3 className="text-xl font-bold text-white mb-2">{googleUser ? "Grant Drive Access" : "Connect Google Drive"}</h3>
+                  <p className="text-zinc-400 max-w-sm mx-auto mb-8">
+                    {googleUser 
+                      ? "Your session for Google Drive has expired. Please authorize again to access your images." 
+                      : "Sign in with your Google account to access and import your photos directly into the vault."}
+                  </p>
                   <button onClick={handleGoogleLogin} className="flex items-center gap-3 bg-white text-black px-6 py-3 rounded-full font-bold hover:bg-zinc-200 transition shadow-lg hover:shadow-xl">
-                     <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                     Sign in with Google
+                     <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                     {googleUser ? "Authorize Drive" : "Sign in with Google"}
                   </button>
                   {driveError && <p className="text-red-400 text-sm mt-4 font-medium">{driveError}</p>}
                 </div>
@@ -2958,7 +2965,13 @@ const App: React.FC = () => {
                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                        Signed in as <span className="text-white font-medium">{googleUser.email}</span>
                      </p>
-                     <button onClick={() => { auth.signOut(); sessionStorage.removeItem('google_access_token'); setDriveImages([]); setDriveSearchQuery(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition self-end sm:self-auto uppercase tracking-widest font-bold">Sign out</button>
+                     <button onClick={() => { 
+                       auth.signOut(); 
+                       sessionStorage.removeItem('google_access_token'); 
+                       setDriveAccessToken(null);
+                       setDriveImages([]); 
+                       setDriveSearchQuery(''); 
+                     }} className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition self-end sm:self-auto uppercase tracking-widest font-bold">Sign out</button>
                   </div>
 
                   <div className="mb-4 flex gap-2">
