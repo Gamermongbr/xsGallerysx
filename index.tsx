@@ -2565,6 +2565,11 @@ const App: React.FC = () => {
                                                 <input 
                                                     value={newTagLabel}
                                                     onChange={e => setNewTagLabel(e.target.value)}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter' && newTagLabel.trim()) {
+                                                            addNewTag();
+                                                        }
+                                                    }}
                                                     placeholder="Label (e.g. Legs🦵)"
                                                     className="flex-1 bg-black/50 border border-white/10 px-3 py-2 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-400"
                                                 />
@@ -2576,6 +2581,20 @@ const App: React.FC = () => {
                                                     + Add New
                                                 </button>
                                             </div>
+
+                                            {/* Shortcut Labels */}
+                                            <div className="flex flex-wrap gap-1.5 px-1">
+                                                {['Boobs', 'Pussy', 'Face', 'Navel'].map(label => (
+                                                    <button
+                                                        key={label}
+                                                        onClick={() => setNewTagLabel(label)}
+                                                        className="px-2.5 py-1 rounded-md bg-white/5 border border-white/5 text-[9px] font-bold text-zinc-400 hover:text-cyan-400 hover:border-cyan-400/30 hover:bg-cyan-400/10 transition-all uppercase tracking-wider"
+                                                    >
+                                                        {label}
+                                                    </button>
+                                                ))}
+                                            </div>
+
                                             <div className="p-4 rounded-xl bg-cyan-400/10 border border-cyan-400/20">
                                                 <p className="text-xs text-cyan-300/80 leading-relaxed">
                                                     <span className="font-bold text-cyan-400">EDIT MODE:</span> Select a label above, then click anywhere on the image to set its precise location. Click "Save Points" when finished.
