@@ -535,6 +535,7 @@ const App: React.FC = () => {
   const [isFetchingDriveImages, setIsFetchingDriveImages] = useState(false);
   const [driveError, setDriveError] = useState<string | null>(null);
   const [driveNextToken, setDriveNextToken] = useState<string | null>(null);
+  const [driveSearchQuery, setDriveSearchQuery] = useState('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -609,11 +610,14 @@ const App: React.FC = () => {
     }
   };
 
-  const fetchDriveImages = async (token: string, pageToken?: string) => {
+  const fetchDriveImages = async (token: string, pageToken?: string, searchQuery?: string) => {
     setIsFetchingDriveImages(true);
     setDriveError(null);
     try {
-      const query = "mimeType contains 'image/' and trashed = false";
+      let query = "mimeType contains 'image/' and trashed = false";
+      if (searchQuery && searchQuery.trim() !== '') {
+          query += ` and name contains '${searchQuery.trim().replace(/'/g, "\\'")}'`;
+      }
       let url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=nextPageToken,files(id,name,mimeType,thumbnailLink,webContentLink)&pageSize=20`;
       if (pageToken) url += `&pageToken=${pageToken}`;
       
@@ -2954,7 +2958,34 @@ const App: React.FC = () => {
                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                        Signed in as <span className="text-white font-medium">{googleUser.email}</span>
                      </p>
-                     <button onClick={() => { auth.signOut(); sessionStorage.removeItem('google_access_token'); setDriveImages([]); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition self-end sm:self-auto uppercase tracking-widest font-bold">Sign out</button>
+                     <button onClick={() => { auth.signOut(); sessionStorage.removeItem('google_access_token'); setDriveImages([]); setDriveSearchQuery(''); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition self-end sm:self-auto uppercase tracking-widest font-bold">Sign out</button>
+                  </div>
+
+                  <div className="mb-4 flex gap-2">
+                      <input 
+                          type="text" 
+                          value={driveSearchQuery}
+                          onChange={(e) => setDriveSearchQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  const token = sessionStorage.getItem('google_access_token');
+                                  if (token) fetchDriveImages(token, undefined, driveSearchQuery);
+                              }
+                          }}
+                          placeholder="Search images by name (e.g. IMG_2023, vacation)..." 
+                          className="flex-1 bg-black/50 border border-white/10 px-4 py-2 rounded-xl text-white focus:outline-none focus:border-green-400 transition text-sm"
+                      />
+                      <button 
+                          onClick={() => {
+                              const token = sessionStorage.getItem('google_access_token');
+                              if (token) fetchDriveImages(token, undefined, driveSearchQuery);
+                          }}
+                          disabled={isFetchingDriveImages}
+                          className="px-4 py-2 bg-green-500/20 text-green-400 hover:bg-green-500/30 disabled:opacity-50 transition rounded-xl flex items-center justify-center shrink-0"
+                      >
+                          <Search className="w-4 h-4" />
+                      </button>
                   </div>
                   
                   <div className="flex-1 overflow-y-auto min-h-[300px] border border-white/10 rounded-2xl bg-black/50 overflow-hidden relative">
@@ -2988,7 +3019,7 @@ const App: React.FC = () => {
                            <div className="flex justify-center mt-6 mb-2">
                               <button onClick={() => {
                                   const token = sessionStorage.getItem('google_access_token');
-                                  if (token) fetchDriveImages(token, driveNextToken);
+                                  if (token) fetchDriveImages(token, driveNextToken, driveSearchQuery);
                               }} disabled={isFetchingDriveImages} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white rounded-full text-sm font-semibold transition border border-white/10">
                                  {isFetchingDriveImages ? <Loader2 className="w-4 h-4 animate-spin inline-block mr-2" /> : null}
                                  {isFetchingDriveImages ? 'Loading...' : 'Load More Options'}
