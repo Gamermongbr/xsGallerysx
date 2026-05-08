@@ -24,6 +24,7 @@ interface FeatureTag {
   id: string;
   label: string;
   point?: { x: number; y: number };
+  zoomIntensity?: number;
 }
 
 interface Image {
@@ -537,6 +538,8 @@ const App: React.FC = () => {
   const [driveNextToken, setDriveNextToken] = useState<string | null>(null);
   const [driveSearchQuery, setDriveSearchQuery] = useState('');
   const [driveAccessToken, setDriveAccessToken] = useState<string | null>(sessionStorage.getItem('google_access_token'));
+  const [labelZoomIntensity, setLabelZoomIntensity] = useState(4);
+  const [hoveredTagId, setHoveredTagId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -695,9 +698,35 @@ const App: React.FC = () => {
   const [editedProfileIsVerified, setEditedProfileIsVerified] = useState(false);
   const [editedGlow, setEditedGlow] = useState<string | undefined>(undefined);
   
+  const [isDraggingPoint, setIsDraggingPoint] = useState(false);
   const [newComment, setNewComment] = useState('');
 
-  const [isDragging, setIsDragging] = useState(false);
+  const handlePointDragStart = (e: React.MouseEvent, tagId: string) => {
+    if (!isEditingPoints) return;
+    e.stopPropagation();
+    setActiveTagId(tagId);
+    setIsDraggingPoint(true);
+  };
+
+  const handleModalImageMouseMove = (e: React.MouseEvent) => {
+    if (!isEditingPoints || !isDraggingPoint || !activeTagId || !modalImageRef.current) return;
+    
+    const rect = modalImageRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    
+    // Constrain to 0-100
+    const constrainedX = Math.max(0, Math.min(100, x));
+    const constrainedY = Math.max(0, Math.min(100, y));
+
+    setTempTags(prev => prev.map(tag => 
+      tag.id === activeTagId ? { ...tag, point: { x: constrainedX, y: constrainedY } } : tag
+    ));
+  };
+
+  const handlePointDragEnd = () => {
+    setIsDraggingPoint(false);
+  };
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const modalImageRef = useRef<HTMLImageElement>(null);
   
@@ -712,7 +741,8 @@ const App: React.FC = () => {
     const newTag: FeatureTag = {
         id: uuidv4(),
         label: newTagLabel.trim(),
-        point: { x: 50, y: 50 }
+        point: { x: 50, y: 50 },
+        zoomIntensity: labelZoomIntensity
     };
     setTempTags(prev => [...prev, newTag]);
     setNewTagLabel('');
@@ -1059,6 +1089,17 @@ const App: React.FC = () => {
     ));
   };
 
+  const deleteTag = (tagId: string) => {
+    setTempTags(prev => prev.filter(t => t.id !== tagId));
+    if (activeTagId === tagId) setActiveTagId(null);
+  };
+
+  const renameTag = (tagId: string, newLabel: string) => {
+    setTempTags(prev => prev.map(t => t.id === tagId ? { ...t, label: newLabel } : t));
+  };
+
+  const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
+
   const startEditingPoints = () => {
     setIsEditingPoints(true);
     setTempTags(selectedImageInfo?.image.featureTags || []);
@@ -1084,12 +1125,16 @@ const App: React.FC = () => {
 
   const handleTagClick = (tagId: string) => {
     setActiveTagId(tagId);
+    const currentTags = isEditingPoints ? tempTags : (selectedImageInfo?.image.featureTags || []);
+    const tag = currentTags.find(t => t.id === tagId);
+    const intensity = tag?.zoomIntensity || labelZoomIntensity;
+
     // Use a small timeout to ensure DOM selection works if elements are re-rendering
     setTimeout(() => {
         if (transformRef.current && typeof transformRef.current.zoomToElement === 'function') {
-            transformRef.current.zoomToElement(`feature-${tagId}`, 4, 800);
+            transformRef.current.zoomToElement(`feature-${tagId}`, intensity, 800);
         }
-    }, 10);
+    }, 50);
   };
 
   const closeModal = useCallback(() => {
@@ -1479,9 +1524,11 @@ const App: React.FC = () => {
                                             {({ zoomToElement }) => {
                                                 // Handle auto-zoom on index change
                                                 useEffect(() => {
-                                                    const currentId = `hb-feature-${hbFilteredItems[hbCurrentIndex]?.tag.id}`;
+                                                    const tag = hbFilteredItems[hbCurrentIndex]?.tag;
+                                                    const currentId = `hb-feature-${tag?.id}`;
+                                                    const intensity = tag?.zoomIntensity || 4.5;
                                                     const timer = setTimeout(() => {
-                                                        zoomToElement(currentId, 4.5, 1000);
+                                                        zoomToElement(currentId, intensity, 1000);
                                                     }, 500);
                                                     return () => clearTimeout(timer);
                                                 }, [hbCurrentIndex, hbFilteredItems, zoomToElement]);
@@ -2211,6 +2258,9 @@ const App: React.FC = () => {
                                     <TransformComponent wrapperStyle={{ width: "100%", height: "100%", willChange: "transform" }} contentStyle={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", willChange: "transform" }}>
                                         <div 
                                           className={`relative w-full h-full flex items-center justify-center ${isEditingPoints ? 'cursor-crosshair' : ''}`}
+                                          onMouseMove={handleModalImageMouseMove}
+                                          onMouseUp={handlePointDragEnd}
+                                          onMouseLeave={handlePointDragEnd}
                                           onClick={handleImageInteraction}
                                         >
                                             <img 
@@ -2221,35 +2271,54 @@ const App: React.FC = () => {
                                                style={{ willChange: 'transform', transform: 'translateZ(0)' }}
                                                draggable={false}
                                             />
+                                            {/* Feature Anchor Points */}
                                             {(isEditingPoints ? tempTags : (selectedImageInfo.image.featureTags || [])).map(tag => (
                                                 <div 
                                                     key={tag.id}
                                                     id={`feature-${tag.id}`}
-                                                    className={`absolute flex flex-col items-center -translate-x-1/2 -translate-y-1/2 w-1 h-1 ${isEditingPoints ? 'pointer-events-auto' : 'pointer-events-none'}`}
+                                                    className={`absolute flex flex-col items-center -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center transition-all ${isEditingPoints ? 'pointer-events-auto' : 'pointer-events-none opacity-0'}`}
                                                     style={{ 
                                                         left: `${tag.point?.x}%`, 
                                                         top: `${tag.point?.y}%`,
+                                                        zIndex: activeTagId === tag.id ? 50 : 40
                                                     }}
                                                 >
+                                                    {/* Professional Visual Point (only visible when editing) */}
                                                     {isEditingPoints && (
-                                                        <>
+                                                        <div 
+                                                            className={`relative flex items-center justify-center transition-all duration-300 ${
+                                                                activeTagId === tag.id || hoveredTagId === tag.id ? 'scale-110' : 'scale-100'
+                                                            } ${isDraggingPoint && activeTagId === tag.id ? 'scale-125' : ''}`}
+                                                            onMouseDown={(e) => handlePointDragStart(e, tag.id)}
+                                                        >
+                                                            {/* Active Ring */}
+                                                            <div className={`absolute -inset-2 rounded-full border border-cyan-400/30 transition-all duration-500 ${
+                                                                activeTagId === tag.id ? 'opacity-100 scale-100' : 'opacity-0 scale-50'
+                                                            }`} />
+
+                                                            {/* Main Point Body */}
                                                             <div 
-                                                                className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
-                                                                activeTagId === tag.id ? 'bg-cyan-400 border-white scale-125 shadow-[0_0_15px_white]' : 'bg-black/50 border-cyan-400'
-                                                                } cursor-pointer animate-pulse`}
+                                                                className={`w-3.5 h-3.5 rounded-full border border-white/50 flex items-center justify-center transition-all shadow-lg ${
+                                                                    activeTagId === tag.id ? 'bg-cyan-400 border-white shadow-cyan-500/50' : 
+                                                                    hoveredTagId === tag.id ? 'bg-zinc-200' : 'bg-white'
+                                                                } cursor-move`}
                                                                 onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setActiveTagId(tag.id);
+                                                                    e.stopPropagation();
+                                                                    setActiveTagId(tag.id);
                                                                 }}
                                                             >
-                                                                <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                                                                <div className={`w-1 h-1 rounded-full ${activeTagId === tag.id || hoveredTagId === tag.id ? 'bg-black' : 'bg-zinc-400'}`} />
                                                             </div>
-                                                            {activeTagId === tag.id && (
-                                                                <div className="mt-2 text-[10px] bg-cyan-400 text-black px-1.5 py-0.5 rounded font-bold whitespace-nowrap shadow-lg z-50">
+
+                                                            {/* Professional Label Tooltip */}
+                                                            <div className={`absolute top-full mt-2 pointer-events-none transition-all duration-300 ${
+                                                                activeTagId === tag.id || hoveredTagId === tag.id ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'
+                                                            }`}>
+                                                                <div className="bg-black/90 backdrop-blur-xl text-white px-2 py-0.5 rounded border border-white/10 text-[9px] font-bold whitespace-nowrap shadow-2xl">
                                                                     {tag.label}
                                                                 </div>
-                                                            )}
-                                                        </>
+                                                            </div>
+                                                        </div>
                                                     )}
                                                 </div>
                                             ))}
@@ -2371,29 +2440,67 @@ const App: React.FC = () => {
                                 </div>
                             </div>
                             
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap gap-2 mb-6">
                                 {(isEditingPoints ? tempTags : (selectedImageInfo.image.featureTags || [])).map((tag, idx) => (
-                                    <motion.button 
+                                    <motion.div
+                                      key={tag.id}
                                       initial={{ scale: 0, opacity: 0 }}
                                       animate={{ scale: 1, opacity: 1 }}
-                                      transition={{ delay: idx * 0.1 }}
-                                      onClick={() => {
-                                        if (isEditingPoints) {
-                                            setActiveTagId(tag.id);
-                                        } else {
-                                            handleTagClick(tag.id);
-                                        }
-                                      }}
-                                      key={tag.id} 
-                                      className={`px-4 py-2 rounded-full border transition flex items-center gap-2 whitespace-nowrap
-                                        ${activeTagId === tag.id 
-                                            ? 'bg-cyan-400 border-white text-black shadow-[0_0_15px_rgba(3,218,198,0.4)]' 
-                                            : 'border-white/10 bg-black/40 hover:bg-white/10 hover:border-cyan-400 text-zinc-300'
-                                        } text-sm font-medium tracking-wide`}
+                                      transition={{ delay: idx * 0.05 }}
+                                      className="relative"
                                     >
-                                        {tag.label}
-                                        {isEditingPoints && activeTagId === tag.id && <Edit2 className="w-3 h-3" />}
-                                    </motion.button>
+                                        <div 
+                                          onMouseEnter={() => setHoveredTagId(tag.id)}
+                                          onMouseLeave={() => setHoveredTagId(null)}
+                                          onClick={() => handleTagClick(tag.id)}
+                                          className={`px-4 py-2 rounded-full border transition flex items-center gap-2 whitespace-nowrap cursor-pointer
+                                            ${activeTagId === tag.id 
+                                                ? 'bg-cyan-400 border-white text-black shadow-[0_0_15px_rgba(34,211,238,0.4)]' 
+                                                : 'border-white/10 bg-black/40 hover:bg-white/10 hover:border-cyan-400 text-zinc-300'
+                                            } text-sm font-medium tracking-wide`}
+                                        >
+                                            {editingLabelId === tag.id ? (
+                                                <input 
+                                                  autoFocus
+                                                  defaultValue={tag.label}
+                                                  onBlur={(e) => {
+                                                      renameTag(tag.id, e.target.value);
+                                                      setEditingLabelId(null);
+                                                  }}
+                                                  onKeyDown={(e) => {
+                                                      if (e.key === 'Enter') {
+                                                          renameTag(tag.id, e.currentTarget.value);
+                                                          setEditingLabelId(null);
+                                                      }
+                                                  }}
+                                                  className="bg-transparent border-none outline-none text-black w-24 font-bold placeholder:text-black/50"
+                                                  onClick={e => e.stopPropagation()}
+                                                />
+                                            ) : (
+                                                <>
+                                                    <span className={activeTagId === tag.id ? "font-bold" : ""}>{tag.label}</span>
+                                                    {isEditingPoints && activeTagId === tag.id && (
+                                                        <div className="flex items-center gap-1 ml-1 pl-2 border-l border-black/20">
+                                                            <button 
+                                                                onClick={(e) => { e.stopPropagation(); setEditingLabelId(tag.id); }}
+                                                                className="p-1 hover:bg-black/10 rounded-full transition-colors"
+                                                                title="Rename Tag"
+                                                            >
+                                                                <Edit2 className="w-3.5 h-3.5" />
+                                                            </button>
+                                                            <button 
+                                                                onClick={(e) => { e.stopPropagation(); deleteTag(tag.id); }}
+                                                                className="p-1 hover:bg-rose-500 hover:text-white rounded-full transition-colors"
+                                                                title="Delete Tag"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </>
+                                            )}
+                                        </div>
+                                    </motion.div>
                                 ))}
                                 
                                 {(!selectedImageInfo.image.featureTags || selectedImageInfo.image.featureTags.length === 0) && !isEditingPoints && (
@@ -2403,30 +2510,81 @@ const App: React.FC = () => {
                                 )}
                             </div>
 
-                            {isEditingPoints && (
-                                <div className="mt-6 flex flex-col gap-4">
-                                    <div className="flex gap-2">
-                                        <input 
-                                            value={newTagLabel}
-                                            onChange={e => setNewTagLabel(e.target.value)}
-                                            placeholder="Label (e.g. Legs🦵)"
-                                            className="flex-1 bg-black/50 border border-white/10 px-3 py-2 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-400"
-                                        />
-                                        <button 
-                                            onClick={addNewTag}
-                                            disabled={!newTagLabel.trim()}
-                                            className="px-3 py-2 rounded-xl bg-cyan-400/20 text-cyan-400 text-xs font-bold whitespace-nowrap hover:bg-cyan-400/30 disabled:opacity-50 transition"
-                                        >
-                                            + Add New
-                                        </button>
-                                    </div>
-                                    <div className="p-4 rounded-xl bg-cyan-400/10 border border-cyan-400/20">
-                                        <p className="text-xs text-cyan-300/80 leading-relaxed">
-                                            <span className="font-bold text-cyan-400">EDIT MODE:</span> Select a label above, then click anywhere on the image to set its precise location. Click "Save Points" when finished.
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
+                            {/* Zoom Setting Controls - Only visible during manual edit mode */}
+                            <AnimatePresence>
+                                {isEditingPoints && (
+                                    <motion.div 
+                                        initial={{ height: 0, opacity: 0, scale: 0.95, translateY: 10 }}
+                                        animate={{ height: 'auto', opacity: 1, scale: 1, translateY: 0, marginTop: 24 }}
+                                        exit={{ height: 0, opacity: 0, scale: 0.95, translateY: 10, marginTop: 0 }}
+                                        transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+                                        className="overflow-hidden"
+                                    >
+                                        <div className="bg-black/40 border border-white/10 rounded-2xl p-4 mb-6">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div className="flex items-center gap-2">
+                                                    <ZoomIn className="w-3.5 h-3.5 text-cyan-400" />
+                                                    <span className="text-[10px] font-bold text-white uppercase tracking-wider">
+                                                        {activeTagId ? `Zoom: ${tempTags.find(t=>t.id===activeTagId)?.label}` : "Default Auto-Zoom"}
+                                                    </span>
+                                                </div>
+                                                <span className="text-[10px] font-mono text-cyan-400 bg-cyan-400/10 px-2 py-0.5 rounded-full border border-cyan-400/20">
+                                                    {activeTagId ? tempTags.find(t=>t.id===activeTagId)?.zoomIntensity || 4 : labelZoomIntensity}x
+                                                </span>
+                                            </div>
+                                            <input 
+                                                type="range" 
+                                                min="1" 
+                                                max="12" 
+                                                step="0.5" 
+                                                value={activeTagId ? tempTags.find(t=>t.id===activeTagId)?.zoomIntensity || 4 : labelZoomIntensity}
+                                                onChange={(e) => {
+                                                    const val = parseFloat(e.target.value);
+                                                    if (activeTagId) {
+                                                        setTempTags(prev => prev.map(t => t.id === activeTagId ? { ...t, zoomIntensity: val } : t));
+                                                    } else {
+                                                        setLabelZoomIntensity(val);
+                                                    }
+                                                }}
+                                                className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+                                            />
+                                            <div className="flex justify-between mt-1 text-[8px] text-zinc-500 font-bold uppercase tracking-widest">
+                                                <span>Wide</span>
+                                                <span>Focused</span>
+                                                <span>Extreme</span>
+                                            </div>
+                                            {activeTagId && (
+                                                <p className="mt-3 text-[9px] text-zinc-500 font-medium italic">
+                                                    Adjusting zoom specifically for <span className="text-cyan-400 font-bold">{tempTags.find(t=>t.id===activeTagId)?.label}</span>
+                                                </p>
+                                            )}
+                                        </div>
+
+                                        <div className="flex flex-col gap-4">
+                                            <div className="flex gap-2">
+                                                <input 
+                                                    value={newTagLabel}
+                                                    onChange={e => setNewTagLabel(e.target.value)}
+                                                    placeholder="Label (e.g. Legs🦵)"
+                                                    className="flex-1 bg-black/50 border border-white/10 px-3 py-2 rounded-xl text-xs text-white focus:outline-none focus:border-cyan-400"
+                                                />
+                                                <button 
+                                                    onClick={addNewTag}
+                                                    disabled={!newTagLabel.trim()}
+                                                    className="px-3 py-2 rounded-xl bg-cyan-400/20 text-cyan-400 text-xs font-bold whitespace-nowrap hover:bg-cyan-400/30 disabled:opacity-50 transition"
+                                                >
+                                                    + Add New
+                                                </button>
+                                            </div>
+                                            <div className="p-4 rounded-xl bg-cyan-400/10 border border-cyan-400/20">
+                                                <p className="text-xs text-cyan-300/80 leading-relaxed">
+                                                    <span className="font-bold text-cyan-400">EDIT MODE:</span> Select a label above, then click anywhere on the image to set its precise location. Click "Save Points" when finished.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                         </div>
 
                         {/* Comments */}
