@@ -2588,11 +2588,11 @@ const App: React.FC = () => {
                         </div>
 
                         {/* Comments */}
-                        <div className="flex flex-col h-full min-h-[300px]">
-                            <h3 className="text-xs uppercase tracking-[0.2em] text-zinc-500 font-bold mb-4 flex items-center gap-2">
+                        <div className="flex flex-col space-y-6">
+                            <h3 className="text-xs uppercase tracking-[0.2em] text-zinc-500 font-bold flex items-center gap-2">
                                 <MessageCircle className="w-4 h-4" /> Log & Notes
                             </h3>
-                            <div className="flex-1 space-y-3 mb-6 overflow-y-auto pr-2 pb-14">
+                            <div className="space-y-3">
                                 {(selectedImageInfo.image.comments || []).map(c => (
                                     <div key={c.id} className="bg-white/5 p-4 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
                                         <div className="flex items-center justify-between mb-2">
@@ -2603,28 +2603,10 @@ const App: React.FC = () => {
                                     </div>
                                 ))}
                                 {(!selectedImageInfo.image.comments || selectedImageInfo.image.comments.length === 0) && (
-                                    <div className="text-center text-zinc-600 py-10 text-sm italic font-light">No notes yet. Be the first to add one.</div>
+                                    <div className="text-center text-zinc-600 py-6 text-sm italic font-light">No notes yet. Be the first to add one.</div>
                                 )}
                             </div>
                             
-                            <form onSubmit={(e) => {
-                                e.preventDefault();
-                                if(!newComment.trim()) return;
-                                const c: Comment = { id: uuidv4(), author: 'Me', text: newComment };
-                                if (selectedImageInfo.profileId) {
-                                  setProfiles(prev => prev.map(p => p.id === selectedImageInfo.profileId ? { ...p, images: p.images.map(img => img.id === selectedImageInfo.image.id ? { ...img, comments: [...(img.comments||[]), c] } : img) } : p));
-                                } else if (selectedImageInfo.sectionId) {
-                                  setSections(prev => prev.map(s => s.id === selectedImageInfo.sectionId ? { ...s, images: s.images.map(img => img.id === selectedImageInfo.image.id ? { ...img, comments: [...(img.comments||[]), c] } : img) } : s));
-                                }
-                                setSelectedImageInfo(prevInfo => prevInfo ? { ...prevInfo, image: { ...prevInfo.image, comments: [...(prevInfo.image.comments||[]), c] } } : null);
-                                setNewComment('');
-                            }} className="mt-auto flex gap-2 pt-4 border-t border-white/10 sticky bottom-0 bg-zinc-900/80 backdrop-blur-xl">
-                                <input placeholder="Add insight..." value={newComment} onChange={e=>setNewComment(e.target.value)} className="flex-1 bg-black/40 border border-white/10 px-4 py-3 rounded-full text-sm focus:outline-none focus:border-cyan-400 transition text-white" />
-                                <button type="submit" disabled={!newComment.trim()} className="w-12 h-12 rounded-full bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 disabled:bg-zinc-700 text-black flex items-center justify-center transition shadow-lg">
-                                    <MessageCircle className="w-5 h-5" />
-                                </button>
-                            </form>
-
                             <button 
                                 onClick={(e) => {
                                     e.stopPropagation();
@@ -2635,13 +2617,44 @@ const App: React.FC = () => {
                                         alt: selectedImageInfo.image.alt
                                     });
                                 }}
-                                className="w-full mt-6 py-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 font-bold uppercase tracking-widest text-[10px] hover:bg-red-500 hover:text-white transition group flex items-center justify-center gap-2"
+                                className="w-full py-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-500 font-bold uppercase tracking-widest text-[10px] hover:bg-red-500 hover:text-white transition group flex items-center justify-center gap-2 mt-4"
                             >
                                 <Trash2 className="w-4 h-4" />
                                 Delete Item from Vault
                             </button>
                         </div>
                     </div>
+
+                    {/* Fixed Footer for Comments */}
+                    <form 
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            if(!newComment.trim()) return;
+                            const c: Comment = { id: uuidv4(), author: 'Me', text: newComment };
+                            if (selectedImageInfo.profileId) {
+                                setProfiles(prev => prev.map(p => p.id === selectedImageInfo.profileId ? { ...p, images: p.images.map(img => img.id === selectedImageInfo.image.id ? { ...img, comments: [...(img.comments||[]), c] } : img) } : p));
+                            } else if (selectedImageInfo.sectionId) {
+                                setSections(prev => prev.map(s => s.id === selectedImageInfo.sectionId ? { ...s, images: s.images.map(img => img.id === selectedImageInfo.image.id ? { ...img, comments: [...(img.comments||[]), c] } : img) } : s));
+                            }
+                            setSelectedImageInfo(prevInfo => prevInfo ? { ...prevInfo, image: { ...prevInfo.image, comments: [...(prevInfo.image.comments||[]), c] } } : null);
+                            setNewComment('');
+                        }} 
+                        className="p-6 lg:p-8 bg-zinc-900/95 backdrop-blur-3xl border-t border-white/10 flex gap-3 z-20"
+                    >
+                        <input 
+                            placeholder="Add insight..." 
+                            value={newComment} 
+                            onChange={e=>setNewComment(e.target.value)} 
+                            className="flex-1 bg-black/40 border border-white/10 px-4 py-3 rounded-full text-sm focus:outline-none focus:border-cyan-400 transition text-white placeholder:text-zinc-600" 
+                        />
+                        <button 
+                            type="submit" 
+                            disabled={!newComment.trim()} 
+                            className="w-12 h-12 rounded-full bg-cyan-400 hover:bg-cyan-300 disabled:opacity-50 disabled:bg-zinc-700 text-black flex items-center justify-center transition shadow-[0_0_20px_rgba(34,211,238,0.3)] shrink-0"
+                        >
+                            <MessageCircle className="w-5 h-5" />
+                        </button>
+                    </form>
                 </motion.div>
              </div>
           </motion.div>
