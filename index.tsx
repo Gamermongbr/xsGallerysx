@@ -2,8 +2,16 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { v4 as uuidv4 } from 'uuid';
 import { motion, AnimatePresence } from 'motion/react';
-import { Lock, Unlock, ShieldAlert, Heart, X, Plus, Trash2, Edit2, ChevronLeft, ChevronRight, Image as ImageIcon, Crosshair, Star, Search, MessageCircle, ZoomIn, ZoomOut, Expand, Link as LinkIcon, Upload, LayoutGrid, FolderArchive, User, BadgeCheck, Gamepad2 } from 'lucide-react';
+import { Lock, Unlock, ShieldAlert, Heart, X, Plus, Trash2, Edit2, ChevronLeft, ChevronRight, Image as ImageIcon, Crosshair, Star, Search, MessageCircle, ZoomIn, ZoomOut, Expand, Link as LinkIcon, Upload, LayoutGrid, FolderArchive, User, BadgeCheck, Gamepad2, Coins, Trophy, CreditCard, Cloud, Loader2 } from 'lucide-react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import firebaseConfig from './firebase-applet-config.json';
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
+googleProvider.addScope('https://www.googleapis.com/auth/drive.readonly');
 
 // --- Type Definitions ---
 interface Comment {
@@ -42,6 +50,28 @@ interface Profile {
   glow?: string;
   profileImage?: string;
   isVerified?: boolean;
+}
+
+// --- Card Game Types ---
+type CardRole = 'Queen' | 'Baddie' | 'Certified Rand' | 'Bitch' | 'Horny' | 'Beauty';
+type SpecialAbility = 'None' | 'Jerk' | 'Tight pussy' | 'Blackhole' | 'Milfy' | 'Pure pink' | 'Fluffy';
+type Currency = 'INR' | 'USD';
+
+interface GameCard {
+  id: string;
+  imageSrc: string;
+  role: CardRole;
+  specialAbility: SpecialAbility;
+  rating10: number;
+  starRating5: number;
+  price: number;
+  currency: Currency;
+}
+
+interface CardDeck {
+  id: string;
+  name: string;
+  cards: GameCard[];
 }
 
 // --- New Fallback Data ---
@@ -205,9 +235,255 @@ const CatIcon: React.FC<{ className?: string }> = ({ className }) => (
     </svg>
 );
 
+const CustomCardUI: React.FC<{ card: GameCard }> = ({ card }) => (
+    <div className="relative aspect-[2.5/3.5] rounded-2xl overflow-hidden bg-zinc-900 border-2 border-white/10 group">
+        <img src={card.imageSrc} alt="Card" className="absolute inset-0 w-full h-full object-cover transition-transform group-hover:scale-110" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
+        
+        <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+            <div className="px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-[10px] font-black text-white uppercase tracking-widest text-right">
+                {card.rating10}/10
+            </div>
+            {card.specialAbility && card.specialAbility !== 'None' && (
+                <div className="px-2 py-0.5 rounded-lg bg-indigo-500/80 backdrop-blur-sm border border-white/10 text-[8px] font-black text-white uppercase tracking-widest shadow-lg">
+                    {card.specialAbility}
+                </div>
+            )}
+        </div>
+
+        <div className="absolute bottom-0 inset-x-0 p-3 flex flex-col gap-1">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/50">{card.role}</span>
+            <div className="flex items-center justify-between">
+                <div className="flex gap-0.5">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                        <Star key={i} className={`w-3 h-3 ${i < card.starRating5 ? 'fill-yellow-400 text-yellow-400' : 'text-white/20'}`} />
+                    ))}
+                </div>
+                <span className="text-sm font-bold text-white">
+                    {card.currency === 'INR' ? '₹' : '$'}{card.price >= 10000 ? `${(card.price / 1000).toFixed(1).replace(/\.0$/, '')}k` : card.price}
+                </span>
+            </div>
+        </div>
+    </div>
+);
+
+
+// --- Battle Game Types ---
+type PlayerPos = 'bottom' | 'top' | 'left' | 'right';
+
+interface BattlePlayer {
+    id: string;
+    name: string;
+    hand: GameCard[];
+    playedCard: GameCard | null;
+    score: number;
+    position: PlayerPos;
+    isAI: boolean;
+}
+
+interface BattleState {
+    players: BattlePlayer[];
+    turnIndex: number;
+    roundLeaderIndex: number;
+    status: 'idle' | 'distributing' | 'playing' | 'selecting-winner' | 'round-result' | 'game-over';
+    winnerMessage: string | null;
+}
+
+const CardBack = ({ position }: { position: PlayerPos }) => (
+    <div className={`relative aspect-[2.5/3.5] rounded-xl overflow-hidden bg-zinc-900 border-2 border-white/10 shadow-2xl transition-all duration-300 ${position === 'left' ? 'rotate-90' : position === 'right' ? '-rotate-90' : position === 'top' ? 'rotate-180' : ''}`}>
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-900 to-black" />
+        <div className="absolute inset-2 border border-white/5 rounded-lg flex items-center justify-center">
+            <div className="w-full h-full opacity-10 bg-[radial-gradient(circle,white_1px,transparent_1px)] bg-[size:10px_10px]" />
+            <div className="absolute flex flex-col items-center gap-2">
+                <Lock className="w-6 h-6 text-indigo-400 opacity-50" />
+                <div className="text-[6px] font-black uppercase tracking-[0.3em] text-indigo-400 rotate-180">xsLocksx</div>
+            </div>
+        </div>
+    </div>
+);
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'home' | 'profiles' | 'arcade' | 'extra'>('home');
+  const [cardGameMode, setCardGameMode] = useState<null | 'deck-list' | 'deck-builder' | 'playing'>(null);
+  
+  // Battle Game State
+  const [battle, setBattle] = useState<BattleState>({
+    players: [],
+    turnIndex: 0,
+    roundLeaderIndex: 0,
+    status: 'idle',
+    winnerMessage: null
+  });
+
+  const startBattle = useCallback((deck: CardDeck) => {
+    if (deck.cards.length < 4) return;
+    
+    const shuffled = [...deck.cards].sort(() => 0.5 - Math.random());
+    const cardsPerPlayer = Math.floor(shuffled.length / 4);
+    
+    const players: BattlePlayer[] = [
+        { id: 'p-human', name: 'You', hand: [], playedCard: null, score: 0, position: 'bottom', isAI: false },
+        { id: 'p-ai1', name: 'AI Opponent 1', hand: [], playedCard: null, score: 0, position: 'top', isAI: true },
+        { id: 'p-ai2', name: 'AI Opponent 2', hand: [], playedCard: null, score: 0, position: 'left', isAI: true },
+        { id: 'p-ai3', name: 'AI Opponent 3', hand: [], playedCard: null, score: 0, position: 'right', isAI: true },
+    ];
+
+    // Distribute cards
+    players.forEach((p, idx) => {
+        p.hand = shuffled.slice(idx * cardsPerPlayer, (idx + 1) * cardsPerPlayer);
+    });
+
+    setBattle({
+        players,
+        turnIndex: 0, // Human starts first round for now
+        roundLeaderIndex: 0,
+        status: 'playing',
+        winnerMessage: null
+    });
+  }, []);
+
+  const playAICards = useCallback(async () => {
+    setBattle(prev => {
+        const nextPlayers = [...prev.players];
+        const currentTurn = prev.turnIndex;
+        const player = nextPlayers[currentTurn];
+
+        if (!player.isAI || player.playedCard || prev.status !== 'playing') return prev;
+
+        const randomCardIdx = Math.floor(Math.random() * player.hand.length);
+        const card = player.hand[randomCardIdx];
+        
+        player.playedCard = card;
+        player.hand = player.hand.filter((_, i) => i !== randomCardIdx);
+
+        const nextTurn = (currentTurn + 1) % 4;
+        
+        // If all players have played
+        if (nextPlayers.every(p => p.playedCard)) {
+            return {
+                ...prev,
+                players: nextPlayers,
+                status: 'selecting-winner',
+                winnerMessage: null
+            };
+        }
+
+        return {
+            ...prev,
+            players: nextPlayers,
+            turnIndex: nextTurn
+        };
+    });
+  }, []);
+
+  // AI Effect
+  useEffect(() => {
+    if (battle.status === 'playing' && battle.players[battle.turnIndex]?.isAI) {
+        const timer = setTimeout(() => {
+            playAICards();
+        }, 1000);
+        return () => clearTimeout(timer);
+    }
+  }, [battle.turnIndex, battle.status, playAICards]);
+
+  const handleSelectWinnerManually = (playerIndex: number) => {
+    if (battle.status !== 'selecting-winner') return;
+
+    setBattle(prev => {
+        const nextPlayers = [...prev.players];
+        nextPlayers[playerIndex].score += 1;
+        const winnerName = nextPlayers[playerIndex].name;
+
+        return {
+            ...prev,
+            players: nextPlayers,
+            status: 'round-result',
+            winnerMessage: `${winnerName} wins this round!`,
+            roundLeaderIndex: playerIndex
+        };
+    });
+  };
+
+  const handleNextRound = () => {
+    setBattle(prev => {
+        const allEmpty = prev.players.every(p => p.hand.length === 0);
+        if (allEmpty) {
+            return { ...prev, status: 'game-over' };
+        }
+
+        return {
+            ...prev,
+            players: prev.players.map(p => ({ ...p, playedCard: null })),
+            turnIndex: prev.roundLeaderIndex,
+            status: 'playing',
+            winnerMessage: null
+        };
+    });
+  };
+
+  const playHumanCard = (card: GameCard) => {
+    if (battle.status !== 'playing' || battle.players[battle.turnIndex].isAI) return;
+
+    setBattle(prev => {
+        const nextPlayers = [...prev.players];
+        const currentTurn = prev.turnIndex;
+        const player = nextPlayers[currentTurn];
+
+        player.playedCard = card;
+        player.hand = player.hand.filter(c => c.id !== card.id);
+
+        const nextTurn = (currentTurn + 1) % 4;
+
+        if (nextPlayers.every(p => p.playedCard)) {
+            return {
+                ...prev,
+                players: nextPlayers,
+                status: 'selecting-winner',
+                winnerMessage: null
+            };
+        }
+
+        return {
+            ...prev,
+            players: nextPlayers,
+            turnIndex: nextTurn
+        };
+    });
+  };
+  const [decks, setDecks] = useState<CardDeck[]>(() => {
+    try {
+      const saved = localStorage.getItem('xlockx_decks');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
+  const [isEditingCards, setIsEditingCards] = useState(false);
+  const cardBuilderInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('xlockx_decks', JSON.stringify(decks));
+    } catch (e) {
+      console.error("Failed to save decks to localStorage", e);
+      // If we hit quota, we might want to alert the user or try to prune.
+    }
+  }, [decks]);
+
+  const activeDeck = decks.find(d => d.id === activeDeckId);
+
+  // Card Creation State
+  const [isAddingCard, setIsAddingCard] = useState(false);
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
+  const [newCardImage, setNewCardImage] = useState('');
+  const [newCardRole, setNewCardRole] = useState<CardRole>('Beauty');
+  const [newCardSpecialAbility, setNewCardSpecialAbility] = useState<SpecialAbility>('None');
+  const [newCardRating10, setNewCardRating10] = useState(5);
+  const [newCardStarRating5, setNewCardStarRating5] = useState(3);
+  const [newCardPrice, setNewCardPrice] = useState(0);
+  const [newCardCurrency, setNewCardCurrency] = useState<Currency>('INR');
+
   // Persistence: Load from localStorage
   const [sections, setSections] = useState<Section[]>(() => {
     try {
@@ -245,12 +521,28 @@ const App: React.FC = () => {
   }, [profiles]);
 
   const [selectedImageInfo, setSelectedImageInfo] = useState<{ image: Image; profileId?: string; sectionId?: string; index: number } | null>(null);
+  const [isFullScreenImage, setIsFullScreenImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const profileImageInputRef = useRef<HTMLInputElement>(null);
   const [activeAddImageSectionId, setActiveAddImageSectionId] = useState<string | null>(null);
   const [activeAddImageProfileId, setActiveAddImageProfileId] = useState<string | null>(null);
   const [newImageUrl, setNewImageUrl] = useState('');
   
+  // Google Drive integration states
+  const [showDriveImport, setShowDriveImport] = useState(false);
+  const [googleUser, setGoogleUser] = useState<FirebaseUser | null>(null);
+  const [driveImages, setDriveImages] = useState<any[]>([]);
+  const [isFetchingDriveImages, setIsFetchingDriveImages] = useState(false);
+  const [driveError, setDriveError] = useState<string | null>(null);
+  const [driveNextToken, setDriveNextToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setGoogleUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const [isAddingSection, setIsAddingSection] = useState(false);
   const [newSectionName, setNewSectionName] = useState('');
   
@@ -301,6 +593,84 @@ const App: React.FC = () => {
     } else {
       console.log('[PWA] User dismissed the install prompt.');
     }
+  };
+
+  const handleGoogleLogin = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        sessionStorage.setItem('google_access_token', credential.accessToken);
+        fetchDriveImages(credential.accessToken);
+      }
+    } catch (error: any) {
+      console.error("Google login error", error);
+      setDriveError(error.message || "Failed to log in to Google");
+    }
+  };
+
+  const fetchDriveImages = async (token: string, pageToken?: string) => {
+    setIsFetchingDriveImages(true);
+    setDriveError(null);
+    try {
+      const query = "mimeType contains 'image/' and trashed = false";
+      let url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=nextPageToken,files(id,name,mimeType,thumbnailLink,webContentLink)&pageSize=20`;
+      if (pageToken) url += `&pageToken=${pageToken}`;
+      
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        if (res.status === 401) {
+            sessionStorage.removeItem('google_access_token');
+            throw new Error("Session expired. Please log in again.");
+        }
+        if (res.status === 403) {
+            throw new Error("Google Drive API is not enabled. Please visit the Google Cloud Console for your Firebase project (ai-studio-applet-webapp-98119) and enable the 'Google Drive API'.");
+        }
+        throw new Error(`Failed to fetch Drive files. Status: ${res.status}`);
+      }
+      const data = await res.json();
+      if (pageToken) {
+         setDriveImages(prev => [...prev, ...(data.files || [])]);
+      } else {
+         setDriveImages(data.files || []);
+      }
+      setDriveNextToken(data.nextPageToken || null);
+    } catch (err: any) {
+      console.error("Drive fetch error", err);
+      setDriveError(err.message || "Could not fetch images from Google Drive");
+    } finally {
+      setIsFetchingDriveImages(false);
+    }
+  };
+
+  const handleSelectDriveImage = (file: any) => {
+    // We can use the high-res thumbnail link simply by stripping the =s220 suffix
+    let imgUrl = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+$/, '=s2000') : file.webContentLink;
+    if (!imgUrl) {
+       alert("Could not extract image URL for this file.");
+       return;
+    }
+    
+    const newImg: Image = {
+      id: uuidv4(),
+      src: imgUrl,
+      alt: file.name,
+      width: 800,
+      height: 800,
+      rating: 0,
+    };
+    
+    if (activeAddImageProfileId) {
+      setProfiles(prev => prev.map(p => p.id === activeAddImageProfileId ? { ...p, images: [...p.images, newImg] } : p));
+    } else if (activeAddImageSectionId) {
+      setSections(prev => prev.map(s => s.id === activeAddImageSectionId ? { ...s, images: [...s.images, newImg] } : s));
+    }
+    
+    setShowDriveImport(false);
+    setActiveAddImageProfileId(null);
+    setActiveAddImageSectionId(null);
   };
 
   const [sectionToDelete, setSectionToDelete] = useState<Section | null>(null);
@@ -362,7 +732,6 @@ const App: React.FC = () => {
   const startWYRGame = () => {
     const allImages = getAllImages();
     if (allImages.length < 2) {
-      alert("You need at least 2 images in your collection to play Would You Rather!");
       return;
     }
     
@@ -373,6 +742,8 @@ const App: React.FC = () => {
       right: shuffled[1]
     });
     setIsWYRActive(true);
+    setIsHBActive(false);
+    setCardGameMode(null);
   };
 
   const selectWYRWinner = (side: 'left' | 'right') => {
@@ -394,6 +765,8 @@ const App: React.FC = () => {
 
   const startHBGame = () => {
     setIsHBActive(true);
+    setIsWYRActive(false);
+    setCardGameMode(null);
     setHbSearchTerm('');
     setHbFilteredItems([]);
     setHbCurrentIndex(0);
@@ -526,6 +899,71 @@ const App: React.FC = () => {
     if (event.target) event.target.value = ''; 
   };
 
+  const handleAddCardFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      try {
+        const base64 = await fileToBase64(file);
+        setNewCardImage(base64);
+      } catch (err) {
+        console.error("Failed to process card image", err);
+      }
+    }
+  };
+
+  const handleAddCard = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCardImage.trim() || !activeDeckId) return;
+
+    try {
+      if (editingCardId) {
+        setDecks(prev => prev.map(d => d.id === activeDeckId ? { 
+          ...d, 
+          cards: d.cards.map(c => c.id === editingCardId ? {
+            ...c,
+            imageSrc: newCardImage,
+            role: newCardRole,
+            specialAbility: newCardSpecialAbility,
+            rating10: newCardRating10,
+            starRating5: newCardStarRating5,
+            price: newCardPrice,
+            currency: newCardCurrency,
+          } : c)
+        } : d));
+      } else {
+        const newCard: GameCard = {
+          id: uuidv4(),
+          imageSrc: newCardImage,
+          role: newCardRole,
+          specialAbility: newCardSpecialAbility,
+          rating10: newCardRating10,
+          starRating5: newCardStarRating5,
+          price: newCardPrice,
+          currency: newCardCurrency,
+        };
+        setDecks(prev => {
+          const deckExists = prev.some(d => d.id === activeDeckId);
+          if (!deckExists) return prev;
+          return prev.map(d => d.id === activeDeckId ? { ...d, cards: [...d.cards, newCard] } : d);
+        });
+      }
+
+      setIsAddingCard(false);
+      setEditingCardId(null);
+      // Reset form
+      setNewCardImage('');
+      setNewCardRole('Beauty');
+      setNewCardSpecialAbility('None');
+      setNewCardRating10(5);
+      setNewCardStarRating5(3);
+      setNewCardPrice(0);
+      setNewCardCurrency('INR');
+    } catch (err) {
+      console.error("Card creation error:", err);
+      alert("Something went wrong while forging your card.");
+    }
+  };
+
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -649,6 +1087,7 @@ const App: React.FC = () => {
 
   const closeModal = useCallback(() => {
     setSelectedImageInfo(null);
+    setIsFullScreenImage(false);
     setIsEditingPoints(false);
     setActiveTagId(null);
     setNewComment('');
@@ -691,6 +1130,7 @@ const App: React.FC = () => {
           <AnimatePresence>
             {showInstallBtn && (
               <motion.button 
+                key="install-btn"
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
@@ -910,10 +1350,10 @@ const App: React.FC = () => {
         )}
 
         {activeTab === 'arcade' && (
-            <motion.div initial={{opacity:0, scale:0.95}} animate={{opacity:1, scale:1}} className={isWYRActive || isHBActive ? "py-4" : "py-10"}>
-                {!isWYRActive && !isHBActive ? (
+            <motion.div initial={{opacity:0, scale:0.95}} animate={{opacity:1, scale:1}} className={isWYRActive || isHBActive || cardGameMode ? "py-4" : "py-10"}>
+                {!isWYRActive && !isHBActive && !cardGameMode ? (
                     <>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto px-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-5xl mx-auto px-4">
                             {[
                                 { 
                                     id: 'wyr', 
@@ -936,10 +1376,15 @@ const App: React.FC = () => {
                                 { 
                                     id: 'cards', 
                                     title: 'Card Games', 
-                                    desc: 'Classic and custom card games for the vault.', 
-                                    icon: FolderArchive, 
+                                    desc: 'Classic and custom card games for the vault. Create your own deck.', 
+                                    icon: CreditCard, 
                                     color: 'from-blue-500 to-indigo-600',
-                                    status: 'UNDER DEV'
+                                    status: 'PLAY NOW',
+                                    onClick: () => {
+                                        setCardGameMode('deck-list');
+                                        setIsWYRActive(false);
+                                        setIsHBActive(false);
+                                    }
                                 }
                             ].map((game) => (
                                 <div 
@@ -1118,7 +1563,408 @@ const App: React.FC = () => {
                             </div>
                          )}
                     </div>
-                ) : (
+                ) : cardGameMode === 'deck-list' ? (
+                    <div className="flex flex-col items-center w-full min-h-[70vh] px-4 max-w-5xl mx-auto">
+                        <div className="flex items-center justify-between w-full mb-12">
+                             <button onClick={() => setCardGameMode(null)} className="flex items-center gap-2 text-zinc-500 hover:text-white transition group px-4 py-2 rounded-full hover:bg-white/5">
+                                 <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+                                 <span className="text-[10px] font-black uppercase tracking-widest">Back to Arcade</span>
+                             </button>
+                             <div className="flex flex-col items-center">
+                                 <div className="flex items-center gap-3">
+                                     <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
+                                         <CreditCard className="w-4 h-4 text-indigo-400" />
+                                     </div>
+                                     <h2 className="font-lobster text-3xl text-white tracking-widest">Deck Collection</h2>
+                                 </div>
+                             </div>
+                             <button 
+                                onClick={() => {
+                                    const newDeck: CardDeck = { id: uuidv4(), name: `My Deck ${decks.length + 1}`, cards: [] };
+                                    setDecks(prev => [...prev, newDeck]);
+                                    setActiveDeckId(newDeck.id);
+                                    setCardGameMode('deck-builder');
+                                }}
+                                className="px-6 py-2.5 bg-indigo-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-400 transition shadow-lg shadow-indigo-500/20"
+                             >
+                                Create New Deck
+                             </button>
+                        </div>
+
+                        {decks.length === 0 ? (
+                            <div className="flex-1 flex flex-col items-center justify-center text-center py-20 bg-zinc-900/40 border border-white/5 rounded-[40px] w-full">
+                                <FolderArchive className="w-16 h-16 text-zinc-700 mb-6" />
+                                <h3 className="text-xl font-bold text-white mb-2">No Decks Found</h3>
+                                <p className="text-zinc-500 text-sm max-w-sm">Start by creating a custom deck for your card games.</p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 w-full">
+                                {decks.map(deck => (
+                                    <div 
+                                        key={deck.id}
+                                        onClick={() => {
+                                            setActiveDeckId(deck.id);
+                                            setCardGameMode('deck-builder');
+                                        }}
+                                        className="bg-zinc-900 border border-white/5 rounded-[32px] p-6 hover:border-indigo-500/50 transition duration-300 cursor-pointer group"
+                                    >
+                                        <div className="aspect-[3/2] bg-black/40 rounded-2xl mb-4 flex items-center justify-center overflow-hidden relative">
+                                            {deck.cards.length > 0 ? (
+                                                <img src={deck.cards[0].imageSrc} className="w-full h-full object-cover opacity-50 group-hover:scale-110 transition-transform duration-500" />
+                                            ) : (
+                                                <CreditCard className="w-10 h-10 text-zinc-700" />
+                                            )}
+                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                <div className="w-10 h-10 rounded-full bg-indigo-500 text-white flex items-center justify-center shadow-lg transform group-hover:scale-110 transition-transform">
+                                                    <ChevronRight className="w-5 h-5" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <h4 className="text-white font-bold mb-1 group-hover:text-indigo-400 transition">{deck.name}</h4>
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">{deck.cards.length} Cards</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                ) : cardGameMode === 'deck-builder' && activeDeck ? (
+                    <div className="flex flex-col items-center w-full min-h-[70vh] px-4 max-w-5xl mx-auto">
+                        <div className="flex items-center justify-between w-full mb-12">
+                             <button onClick={() => { setCardGameMode('deck-list'); setIsEditingCards(false); }} className="flex items-center gap-2 text-zinc-500 hover:text-white transition group px-4 py-2 rounded-full hover:bg-white/5">
+                                 <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+                                 <span className="text-[10px] font-black uppercase tracking-widest">Back to Decks</span>
+                             </button>
+                            <div className="flex flex-col gap-1 items-end">
+                                <div className="flex items-center gap-2">
+                                     <input 
+                                        type="text"
+                                        value={activeDeck.name}
+                                        onChange={(e) => {
+                                            setDecks(prev => prev.map(d => d.id === activeDeck.id ? { ...d, name: e.target.value } : d));
+                                        }}
+                                        className="bg-transparent border-none text-white font-lobster text-3xl text-right focus:outline-none focus:ring-0 max-w-[200px]"
+                                     />
+                                     <Edit2 className="w-4 h-4 text-zinc-500" />
+                                </div>
+                                 <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.4em]">Deck Builder</p>
+                             </div>
+                             <div className="flex gap-2">
+                                <button 
+                                    onClick={() => setIsEditingCards(!isEditingCards)}
+                                    className={`px-4 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 border ${isEditingCards ? 'bg-red-500 text-white border-red-400' : 'bg-white/5 text-zinc-500 hover:text-white border-white/10'}`}
+                                >
+                                    {isEditingCards ? <X className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
+                                    {isEditingCards ? 'Stop Editing' : 'Edit Cards'}
+                                </button>
+                                <button 
+                                    disabled={!activeDeck || activeDeck.cards.length < 4}
+                                    onClick={() => { setCardGameMode('playing'); setIsEditingCards(false); }}
+                                    className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl hover:scale-105 active:scale-95 ${activeDeck && activeDeck.cards.length >= 4 ? 'bg-cyan-500 text-black hover:bg-cyan-400 shadow-cyan-500/40' : 'bg-zinc-800 text-zinc-500 grayscale cursor-not-allowed'}`}
+                                >
+                                    {(activeDeck && activeDeck.cards.length >= 4) ? 'START GAME' : activeDeck ? `Need ${4 - activeDeck.cards.length} more cards` : 'Select Deck'}
+                                </button>
+                             </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 w-full">
+                            {/* Card Grid */}
+                            <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                                <button 
+                                    onClick={() => {
+                                        setEditingCardId(null);
+                                        setNewCardImage('');
+                                        setNewCardRole('Beauty');
+                                        setNewCardSpecialAbility('None');
+                                        setNewCardRating10(5);
+                                        setNewCardStarRating5(3);
+                                        setNewCardPrice(0);
+                                        setNewCardCurrency('INR');
+                                        setIsAddingCard(true);
+                                    }}
+                                    className="aspect-[2.5/3.5] rounded-3xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center gap-3 hover:border-indigo-500/50 hover:bg-indigo-500/5 transition group"
+                                >
+                                    <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center group-hover:scale-110 transition">
+                                        <Plus className="w-6 h-6 text-indigo-400" />
+                                    </div>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 group-hover:text-white">Add Card</span>
+                                </button>
+
+                                {activeDeck.cards.map(card => (
+                                    <div key={card.id} className="relative group">
+                                        <CustomCardUI card={card} />
+                                        <div className={`absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60 backdrop-blur-[2px] transition-all duration-300 rounded-2xl ${isEditingCards ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto'}`}>
+                                            <button 
+                                                onClick={() => {
+                                                    setEditingCardId(card.id);
+                                                    setNewCardImage(card.imageSrc);
+                                                    setNewCardRole(card.role);
+                                                    setNewCardSpecialAbility(card.specialAbility || 'None');
+                                                    setNewCardRating10(card.rating10);
+                                                    setNewCardStarRating5(card.starRating5);
+                                                    setNewCardPrice(card.price || 0);
+                                                    setNewCardCurrency(card.currency);
+                                                    setIsAddingCard(true);
+                                                }}
+                                                className="w-10 h-10 rounded-full bg-white text-black shadow-xl hover:bg-indigo-500 hover:text-white transition-all transform hover:scale-110 flex items-center justify-center border border-white/20"
+                                            >
+                                                <Edit2 className="w-5 h-5" />
+                                            </button>
+                                            <button 
+                                                onClick={() => {
+                                                    if (confirm("Delete this card from your deck?")) {
+                                                        setDecks(prev => prev.map(d => d.id === activeDeckId ? { ...d, cards: d.cards.filter(c => c.id !== card.id) } : d));
+                                                    }
+                                                }}
+                                                className="w-10 h-10 rounded-full bg-red-500 text-white shadow-xl hover:bg-red-600 transition-all transform hover:scale-110 flex items-center justify-center border border-red-400/50"
+                                            >
+                                                <Trash2 className="w-5 h-5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Deck Stats/Quick Tips */}
+                            <div className="bg-zinc-900 border border-white/5 rounded-[40px] p-8 h-fit space-y-6">
+                                <h4 className="text-white font-bold uppercase text-xs tracking-widest mb-4">Deck Statistics</h4>
+                                <div className="space-y-4">
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="text-zinc-500">Total Value</span>
+                                        <span className="text-white font-bold">
+                                            {activeDeck.cards.reduce((sum, c) => sum + (c.currency === 'INR' ? (c.price || 0) / 80 : (c.price || 0)), 0).toFixed(2)} USD
+                                        </span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs">
+                                        <span className="text-zinc-500">Avg. Rating</span>
+                                        <span className="text-white font-bold">
+                                            {(activeDeck.cards.reduce((sum, c) => sum + (c.rating10 || 0), 0) / (activeDeck.cards.length || 1)).toFixed(1)}/10
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="pt-6 border-t border-white/5">
+                                    <p className="text-[10px] text-zinc-500 font-medium italic leading-relaxed">
+                                        "A balanced deck requires a mix of Queens, Baddies, and Beauties. Make sure your star ratings are consistently high for maximum advantage."
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ) : cardGameMode === 'playing' && activeDeck ? (
+                    <div className="fixed inset-0 z-[100] bg-[#050505] flex flex-col items-center overflow-hidden">
+                        {/* Arena Background */}
+                        <div className="absolute inset-0 opacity-20 pointer-events-none">
+                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-500/10 blur-[120px] rounded-full" />
+                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:40px_40px]" />
+                        </div>
+
+                        {/* Top Bar / Controls */}
+                        <div className="relative z-10 w-full p-4 flex justify-between items-center bg-black/40 backdrop-blur-md border-b border-white/5">
+                             <button 
+                                onClick={() => {
+                                    if (battle.status !== 'idle' && battle.status !== 'game-over') {
+                                        if (!confirm("Quit current game? Progress will be lost.")) return;
+                                    }
+                                    setCardGameMode('deck-builder');
+                                    setBattle(p => ({ ...p, status: 'idle' }));
+                                }} 
+                                className="flex items-center gap-2 text-zinc-500 hover:text-white transition group px-4 py-2 rounded-full hover:bg-white/5"
+                             >
+                                 <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+                                 <span className="text-[10px] font-black uppercase tracking-widest">Surrender</span>
+                             </button>
+                             
+                             <div className="flex flex-col items-center">
+                                 <h2 className="font-lobster text-2xl text-white tracking-widest">Arena</h2>
+                                 <p className="text-[8px] text-cyan-400 font-bold uppercase tracking-[0.4em]">Multiplayer Battle</p>
+                             </div>
+
+                             <div className="flex items-center gap-4">
+                                 {battle.status !== 'idle' && (
+                                     <div className="flex items-center gap-6">
+                                         {battle.players.map(p => (
+                                             <div key={`header-${p.id}`} className="flex flex-col items-center">
+                                                 <span className={`text-[8px] font-black uppercase tracking-widest mb-1 ${p.isAI ? 'text-zinc-500' : 'text-cyan-400'}`}>{p.name}</span>
+                                                 <span className="text-sm font-bold text-white">{p.score}</span>
+                                             </div>
+                                         ))}
+                                     </div>
+                                 )}
+                             </div>
+                        </div>
+
+                        {/* Battle Table */}
+                        <div className="flex-1 w-full relative flex items-center justify-center p-2 md:p-4 overflow-hidden">
+                            {battle.status === 'idle' ? (
+                                <div className="flex flex-col items-center gap-6 md:gap-8 text-center animate-in fade-in zoom-in duration-700">
+                                    <div className="w-24 h-24 md:w-40 md:h-40 rounded-[30px] md:rounded-[50px] bg-zinc-900 border border-white/10 flex items-center justify-center relative overflow-hidden group">
+                                        <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/20 to-purple-600/20 group-hover:opacity-40 transition-opacity" />
+                                        <Gamepad2 className="w-10 h-10 md:w-16 md:h-16 text-white relative z-10" />
+                                    </div>
+                                    <div className="space-y-4">
+                                        <h3 className="text-3xl md:text-5xl font-black text-white italic tracking-tighter uppercase">Ready for War?</h3>
+                                        <p className="text-zinc-500 text-xs md:text-sm max-w-xs md:max-w-sm mx-auto leading-relaxed">
+                                            Your deck <span className="text-white font-bold">{activeDeck.name}</span> is loaded. 4 players, equal cards, one winner.
+                                        </p>
+                                    </div>
+                                    <button 
+                                        onClick={() => startBattle(activeDeck)}
+                                        className="px-12 py-5 md:px-20 md:py-7 bg-cyan-500 text-black rounded-[2rem] md:rounded-[3rem] font-black uppercase tracking-[0.3em] text-[12px] md:text-lg hover:scale-110 active:scale-95 transition-all shadow-[0_20px_50px_rgba(6,182,212,0.4)] border-b-6 md:border-b-[10px] border-cyan-700"
+                                    >
+                                        START GAME
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="w-full h-full max-w-6xl max-h-[900px] relative flex items-center justify-center">
+                                    {/* Table Center (Played Cards) */}
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                        <div className="w-[320px] h-[320px] md:w-[700px] md:h-[700px] rounded-full border border-white/10 bg-white/[0.04] flex items-center justify-center relative shadow-[0_0_150px_rgba(255,255,255,0.03)]">
+                                            <div className="absolute inset-[10%] rounded-full border border-white/5 bg-white/[0.01]" />
+                                            
+                                            {/* Played Cards Positions */}
+                                            {battle.players.map((p, idx) => {
+                                                const pos = p.position;
+                                                const offsets: Record<string, string> = {
+                                                    top: "-translate-y-28 md:-translate-y-80",
+                                                    bottom: "translate-y-28 md:translate-y-80",
+                                                    left: "-translate-x-32 md:-translate-x-80",
+                                                    right: "translate-x-32 md:translate-x-80",
+                                                };
+                                                
+                                                return (
+                                                    <AnimatePresence key={`anim-${p.id}`}>
+                                                        {p.playedCard && (
+                                                            <motion.div 
+                                                                key={`played-${p.playedCard.id}`}
+                                                                initial={{ 
+                                                                    opacity: 0, 
+                                                                    scale: 0.5,
+                                                                    x: pos === 'left' ? -200 : pos === 'right' ? 200 : 0,
+                                                                    y: pos === 'top' ? -200 : pos === 'bottom' ? 200 : 0,
+                                                                }}
+                                                                animate={{ opacity: 1, scale: window.innerWidth < 768 ? 0.8 : 1.4, x: 0, y: 0 }}
+                                                                onClick={() => handleSelectWinnerManually(idx)}
+                                                                className={`absolute w-36 md:w-52 z-20 pointer-events-auto ${offsets[pos]} ${battle.status === 'selecting-winner' ? 'cursor-pointer hover:scale-[1.1] md:hover:scale-150 transition-all ring-4 ring-cyan-400 ring-offset-4 ring-offset-black rounded-2xl animate-pulse shadow-[0_0_50px_rgba(34,211,238,0.5)]' : ''}`}
+                                                            >
+                                                                <CustomCardUI card={p.playedCard} />
+                                                            </motion.div>
+                                                        )}
+                                                    </AnimatePresence>
+                                                );
+                                            })}
+
+                                            {/* Round Info Overlay */}
+                                            {battle.winnerMessage && (
+                                                <motion.div 
+                                                    initial={{ opacity: 0, scale: 0.8 }}
+                                                    animate={{ opacity: 1, scale: 1 }}
+                                                    className="absolute z-[100] flex flex-col items-center gap-6"
+                                                >
+                                                    <div className="px-10 py-5 rounded-[2rem] bg-cyan-500 text-black font-black uppercase tracking-widest text-sm shadow-[0_0_50px_rgba(6,182,212,0.6)]">
+                                                        {battle.winnerMessage}
+                                                    </div>
+                                                    {battle.status === 'round-result' && (
+                                                        <button 
+                                                            onClick={handleNextRound}
+                                                            className="px-12 py-4 rounded-[1.5rem] bg-white text-black font-black uppercase tracking-widest text-xs hover:scale-110 active:scale-95 transition shadow-2xl border-b-4 border-zinc-200"
+                                                        >
+                                                            Next Round
+                                                        </button>
+                                                    )}
+                                                </motion.div>
+                                            )}
+
+                                            {/* Turn Indicator */}
+                                            {!battle.winnerMessage && battle.status === 'playing' && (
+                                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                                    <div className="text-zinc-700 text-xs font-black uppercase tracking-[0.6em] animate-pulse">
+                                                        {battle.players[battle.turnIndex]?.name}'s Turn
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Player Areas */}
+                                    {battle.players.map(p => {
+                                        const isMyTurn = battle.turnIndex === battle.players.indexOf(p);
+                                        const posStyles: Record<string, string> = {
+                                            top: "absolute top-0 left-1/2 -translate-x-1/2",
+                                            bottom: "absolute bottom-0 left-1/2 -translate-x-1/2 w-full",
+                                            left: "absolute left-0 top-1/2 -translate-y-1/2",
+                                            right: "absolute right-0 top-1/2 -translate-y-1/2",
+                                        };
+
+                                        return (
+                                            <div key={`table-${p.id}`} className={`${posStyles[p.position]} flex flex-col items-center gap-2 md:gap-4 shrink-0 transition-all duration-500`}>
+                                                {/* Player Info Chip */}
+                                                <div className={`px-3 py-1 md:px-4 md:py-1.5 rounded-full border transition-all duration-500 ${p.position === 'left' ? 'rotate-90' : p.position === 'right' ? '-rotate-90' : ''} ${isMyTurn ? 'bg-cyan-500/10 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.2)]' : 'bg-black/40 border-white/10'}`}>
+                                                    <div className="flex items-center gap-1 md:gap-2">
+                                                        <div className={`w-1 h-1 md:w-1.5 md:h-1.5 rounded-full ${isMyTurn ? 'bg-cyan-400 animate-pulse' : 'bg-zinc-700'}`} />
+                                                        <span className={`text-[8px] md:text-[10px] font-black uppercase tracking-widest ${isMyTurn ? 'text-white' : 'text-zinc-500'}`}>{p.name}</span>
+                                                        <span className="text-zinc-600 text-[6px] md:text-[8px] font-bold">({p.hand.length})</span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Hands Visualization */}
+                                                {p.position === 'bottom' ? (
+                                                    <div className="flex items-center justify-center gap-1 md:gap-3 p-2 md:p-6 w-[95vw] md:w-full overflow-x-auto no-scrollbar scroll-smooth">
+                                                        {p.hand.map(card => (
+                                                            <motion.div 
+                                                                key={card.id}
+                                                                whileHover={{ y: -30, scale: 1.2, zIndex: 10 }}
+                                                                onClick={() => playHumanCard(card)}
+                                                                className={`w-28 md:w-44 shrink-0 transition-all duration-300 ${isMyTurn ? 'cursor-pointer hover:shadow-[0_0_50px_rgba(6,182,212,0.4)]' : 'opacity-40 grayscale pointer-events-none'}`}
+                                                            >
+                                                                <CustomCardUI card={card} />
+                                                            </motion.div>
+                                                        ))}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Game Over Screen */}
+                        <AnimatePresence>
+                                    {battle.status === 'game-over' && (
+                                        <motion.div 
+                                            key="game-over-screen"
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-xl flex items-center justify-center p-4 md:p-8"
+                                        >
+                                            <div className="w-full max-w-md bg-zinc-900 rounded-[30px] md:rounded-[40px] p-6 md:p-10 border border-white/10 shadow-2xl flex flex-col items-center text-center">
+                                                <Trophy className="w-12 h-12 md:w-20 md:h-20 text-yellow-500 mb-4 md:mb-6 drop-shadow-[0_0_30px_rgba(234,179,8,0.4)]" />
+                                                <h3 className="text-2xl md:text-4xl font-black text-white px-2 italic uppercase tracking-tighter mb-2">Final Scores</h3>
+                                                <div className="w-full space-y-2 md:space-y-3 mb-6 md:mb-10">
+                                                    {[...battle.players].sort((a, b) => b.score - a.score).map((p, idx) => (
+                                                        <div key={`score-${p.id}`} className={`flex items-center justify-between p-3 md:p-4 rounded-xl md:rounded-2xl border ${idx === 0 ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-white/5 border-white/5'}`}>
+                                                            <div className="flex items-center gap-2 md:gap-3">
+                                                                <span className="text-sm md:text-lg font-black italic text-white/20">#{idx + 1}</span>
+                                                                <span className="text-xs md:text-sm text-white font-bold">{p.name}</span>
+                                                            </div>
+                                                            <span className="text-lg md:text-xl font-black text-white">{p.score}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <button 
+                                                    onClick={() => {
+                                                        setBattle(p => ({ ...p, status: 'idle' }));
+                                                        setCardGameMode('deck-list');
+                                                    }}
+                                                    className="w-full py-4 md:py-5 rounded-2xl md:rounded-3xl bg-white text-black font-black uppercase tracking-[0.2em] text-[10px] md:text-xs hover:bg-cyan-500 hover:text-white transition-all shadow-xl"
+                                                >
+                                                    Return to Menu
+                                                </button>
+                                            </div>
+                                        </motion.div>
+                                    )}
+                        </AnimatePresence>
+                    </div>
+                ) : isWYRActive ? (
                     <div className="flex flex-col items-center w-full min-h-[70vh] px-4 max-w-6xl mx-auto">
                         <div className="flex items-center justify-between w-full mb-8">
                              <button onClick={() => setIsWYRActive(false)} className="flex items-center gap-2 text-zinc-500 hover:text-white transition group px-4 py-2 rounded-full hover:bg-white/5">
@@ -1210,7 +2056,7 @@ const App: React.FC = () => {
                             </div>
                         </div>
                     </div>
-                )}
+                ) : null}
             </motion.div>
         )}
 
@@ -1258,46 +2104,50 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Floating Bottom Navigation */}
-      <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[5000] w-[320px]">
-          <div className="bg-black/80 backdrop-blur-2xl border border-white/10 rounded-full p-2 flex items-center justify-between shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
-              {[
-                  { id: 'home', icon: LayoutGrid, label: 'Sections' },
-                  { id: 'profiles', icon: User, label: 'Profiles' },
-                  { id: 'arcade', icon: Gamepad2, label: 'Arcade' },
-                  { id: 'extra', icon: ShieldAlert, label: 'Vault' }
-              ].map((tab) => (
-                  <button 
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className="relative px-6 py-4 rounded-full transition-all duration-300"
-                  >
-                      {activeTab === tab.id && (
-                          <motion.div 
-                            layoutId="nav-bg"
-                            className="absolute inset-0 bg-white/5 rounded-full"
-                            transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
-                          />
-                      )}
-                      <tab.icon className={`w-6 h-6 relative z-10 transition-colors duration-300 ${activeTab === tab.id ? 'text-cyan-400' : 'text-zinc-500'}`} />
-                      {activeTab === tab.id && (
-                          <motion.div 
-                            layoutId="nav-dot"
-                            className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 bg-cyan-400 rounded-full"
-                          />
-                      )}
-                  </button>
-              ))}
+                             {/* Floating Bottom Navigation */}
+      {cardGameMode !== 'playing' && (
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[5000] w-[320px]">
+              <div className="bg-black/80 backdrop-blur-2xl border border-white/10 rounded-full p-2 flex items-center justify-between shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+                  {[
+                      { id: 'home', icon: LayoutGrid, label: 'Sections' },
+                      { id: 'profiles', icon: User, label: 'Profiles' },
+                      { id: 'arcade', icon: Gamepad2, label: 'Arcade' },
+                      { id: 'extra', icon: ShieldAlert, label: 'Vault' }
+                  ].map((tab) => (
+                      <button 
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id as any)}
+                        className="relative px-6 py-4 rounded-full transition-all duration-300"
+                      >
+                          {activeTab === tab.id && (
+                              <motion.div 
+                                layoutId="nav-bg"
+                                className="absolute inset-0 bg-white/5 rounded-full"
+                                transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+                              />
+                          )}
+                          <tab.icon className={`w-6 h-6 relative z-10 transition-colors duration-300 ${activeTab === tab.id ? 'text-cyan-400' : 'text-zinc-500'}`} />
+                          {activeTab === tab.id && (
+                              <motion.div 
+                                layoutId="nav-dot"
+                                className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 bg-cyan-400 rounded-full"
+                              />
+                          )}
+                      </button>
+                  ))}
+              </div>
           </div>
-      </div>
+      )}
 
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
       <input type="file" ref={profileImageInputRef} onChange={handleProfileImageChange} className="hidden" accept="image/*" />
+      <input type="file" ref={cardBuilderInputRef} onChange={handleAddCardFileChange} className="hidden" accept="image/*" />
 
       {/* --- Image Viewer Modal --- */}
       <AnimatePresence>
         {selectedImageInfo && (
           <motion.div 
+            key="image-viewer"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -1336,6 +2186,7 @@ const App: React.FC = () => {
                             smooth={true}
                             doubleClick={{ disabled: true }}
                             panning={{ lockAxisX: false, lockAxisY: false }}
+                            wheel={{ step: 0.1, smoothStep: 0.005 }}
                         >
                             {({ zoomIn, zoomOut, resetTransform }) => (
                                 <React.Fragment>
@@ -1350,7 +2201,7 @@ const App: React.FC = () => {
                                             <Expand className="w-4 h-4"/>
                                         </button>
                                     </div>
-                                    <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }} contentStyle={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
+                                    <TransformComponent wrapperStyle={{ width: "100%", height: "100%", willChange: "transform" }} contentStyle={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", willChange: "transform" }}>
                                         <div 
                                           className={`relative w-full h-full flex items-center justify-center ${isEditingPoints ? 'cursor-crosshair' : ''}`}
                                           onClick={handleImageInteraction}
@@ -1360,6 +2211,7 @@ const App: React.FC = () => {
                                                src={selectedImageInfo.image.src}
                                                alt="Fullscreen view"
                                                className="max-w-full max-h-full object-contain p-2 lg:p-4 drop-shadow-2xl select-none"
+                                               style={{ willChange: 'transform', transform: 'translateZ(0)' }}
                                                draggable={false}
                                             />
                                             {(isEditingPoints ? tempTags : (selectedImageInfo.image.featureTags || [])).map(tag => (
@@ -1454,9 +2306,9 @@ const App: React.FC = () => {
                     <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-8 custom-scroll">
                         {/* Actions */}
                         <div className="flex justify-center gap-4">
-                            <button onClick={()=>handleSmashClick()} className="group flex-1 py-4 rounded-2xl border border-white/10 bg-white/5 hover:border-cyan-400 hover:bg-cyan-400/10 flex flex-col items-center justify-center gap-2 transition">
-                                <Search className="w-6 h-6 text-zinc-400 group-hover:text-cyan-400" />
-                                <span className="text-[10px] uppercase font-bold text-zinc-500 group-hover:text-cyan-400 tracking-wider">Inspect</span>
+                            <button onClick={()=>setIsFullScreenImage(true)} className="group flex-1 py-4 rounded-2xl border border-white/10 bg-white/5 hover:border-cyan-400 hover:bg-cyan-400/10 flex flex-col items-center justify-center gap-2 transition">
+                                <Expand className="w-6 h-6 text-zinc-400 group-hover:text-cyan-400" />
+                                <span className="text-[10px] uppercase font-bold text-zinc-500 group-hover:text-cyan-400 tracking-wider">Full Screen</span>
                             </button>
                             <button onClick={handleHeartClick} className="group flex-1 py-4 rounded-2xl border border-white/10 bg-white/5 hover:border-pink-500 hover:bg-pink-500/10 flex flex-col items-center justify-center gap-2 transition">
                                 <Heart className="w-6 h-6 text-zinc-400 group-hover:text-pink-500" />
@@ -1629,12 +2481,53 @@ const App: React.FC = () => {
              </div>
           </motion.div>
         )}
+        
+        {selectedImageInfo && isFullScreenImage && (
+          <motion.div 
+             initial={{ opacity: 0 }}
+             animate={{ opacity: 1 }}
+             exit={{ opacity: 0 }}
+             className="fixed inset-0 z-[10000] bg-black text-white pointer-events-auto"
+          >
+              <button
+                 onClick={() => setIsFullScreenImage(false)}
+                 className="absolute top-6 left-6 z-[10010] w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white backdrop-blur-md border border-white/20 transition-all shadow-xl"
+              >
+                 <ChevronLeft className="w-6 h-6" />
+              </button>
+
+              <div className="absolute inset-0 w-full h-full">
+                  <TransformWrapper
+                      initialScale={1}
+                      minScale={0.1}
+                      maxScale={20}
+                      centerOnInit
+                      limitToBounds={false}
+                      smooth={true}
+                      wheel={{ step: 0.1, smoothStep: 0.005 }}
+                      doubleClick={{ disabled: false, step: 2 }}
+                  >
+                      <TransformComponent 
+                          wrapperStyle={{ width: '100%', height: '100%' }} 
+                          contentStyle={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', willChange: 'transform' }}
+                      >
+                          <img 
+                              src={selectedImageInfo.image.src}
+                              alt={selectedImageInfo.image.alt}
+                              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', transform: 'translateZ(0)', willChange: 'transform' }}
+                              draggable={false}
+                          />
+                      </TransformComponent>
+                  </TransformWrapper>
+              </div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* --- Global Modals --- */}
       <AnimatePresence>
         {(activeAddImageProfileId || activeAddImageSectionId) && (
-            <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-[9000] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <motion.div key="add-image-modal" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-[9000] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
                 <motion.div initial={{scale:0.95, y:20}} animate={{scale:1, y:0}} exit={{scale:0.95, y:20}} className="bg-zinc-900 border border-white/10 p-8 rounded-3xl w-full max-w-md shadow-2xl relative">
                     <button onClick={() => { setActiveAddImageProfileId(null); setActiveAddImageSectionId(null); }} className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/10 transition">
                         <X className="w-5 h-5"/>
@@ -1649,6 +2542,20 @@ const App: React.FC = () => {
                            <div className="text-left">
                                <h3 className="text-white font-medium">Upload from Device</h3>
                                <p className="text-zinc-400 text-sm">Select a file from your local storage</p>
+                           </div>
+                       </button>
+
+                       <button onClick={() => {
+                           setShowDriveImport(true);
+                           const token = sessionStorage.getItem('google_access_token');
+                           if (token) fetchDriveImages(token);
+                       }} className="flex items-center gap-4 p-4 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-green-400/50 transition group">
+                           <div className="w-12 h-12 rounded-full bg-green-400/20 text-green-400 flex items-center justify-center group-hover:scale-110 transition shrink-0">
+                               <Cloud className="w-6 h-6"/>
+                           </div>
+                           <div className="text-left">
+                               <h3 className="text-white font-medium">Import from Drive</h3>
+                               <p className="text-zinc-400 text-sm">Sign in to fetch Drive images</p>
                            </div>
                        </button>
 
@@ -1683,6 +2590,156 @@ const App: React.FC = () => {
                            </button>
                         </div>
                     </div>
+                </motion.div>
+            </motion.div>
+        )}
+        {isAddingCard && (
+            <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-[9000] bg-black/95 backdrop-blur-xl mb-12 flex items-center justify-center p-4">
+                <motion.div initial={{scale:0.95, y:20}} animate={{scale:1, y:0}} exit={{scale:0.95, y:20}} className="bg-zinc-900 border border-white/10 p-8 rounded-[40px] w-full max-w-4xl shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                    <button onClick={() => { setIsAddingCard(false); setEditingCardId(null); }} className="absolute top-6 right-6 p-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/10 transition">
+                        <X className="w-5 h-5"/>
+                    </button>
+                    <h2 className="text-3xl font-lobster text-white mb-8 text-center italic tracking-widest leading-none">{editingCardId ? 'Reshape Your Card' : 'Forge New Card'}</h2>
+
+                    <form onSubmit={handleAddCard} className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                        {/* Image Side */}
+                        <div className="space-y-6">
+                            <div 
+                                onClick={() => cardBuilderInputRef.current?.click()}
+                                className="aspect-[2.5/3.5] rounded-[32px] bg-black border-2 border-dashed border-white/10 overflow-hidden cursor-pointer group relative flex flex-col items-center justify-center transition-all hover:border-indigo-500/50"
+                            >
+                                {newCardImage ? (
+                                    <img src={newCardImage} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                ) : (
+                                    <div className="flex flex-col items-center text-zinc-600 group-hover:text-indigo-400 transition">
+                                        <Plus className="w-10 h-10 mb-2" />
+                                        <span className="text-[10px] font-black uppercase tracking-widest">Card Artwork</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Image Source URL</label>
+                                <input 
+                                    type="text" 
+                                    value={newCardImage}
+                                    onChange={(e) => setNewCardImage(e.target.value)}
+                                    placeholder="Paste Link..."
+                                    className="w-full bg-black/40 border border-white/10 py-3.5 px-5 rounded-2xl text-white text-sm focus:outline-none focus:border-indigo-500 transition"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Details Side */}
+                        <div className="space-y-6">
+                            {/* Role Selection */}
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Role Identity</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {['Queen', 'Baddie', 'Certified Rand', 'Bitch', 'Horny', 'Beauty'].map(role => (
+                                        <button
+                                            key={role}
+                                            type="button"
+                                            onClick={() => setNewCardRole(role as CardRole)}
+                                            className={`py-2 rounded-xl text-[9px] font-black uppercase tracking-tight transition-all border ${newCardRole === role ? 'bg-indigo-500 border-indigo-400 text-white shadow-lg shadow-indigo-500/20' : 'bg-black/40 border-white/5 text-zinc-500 hover:border-white/20'}`}
+                                        >
+                                            {role}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Special Ability Selection */}
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Special Ability</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {['None', 'Jerk', 'Tight pussy', 'Blackhole', 'Milfy', 'Pure pink', 'Fluffy'].map(ability => (
+                                        <button
+                                            key={ability}
+                                            type="button"
+                                            onClick={() => setNewCardSpecialAbility(ability as SpecialAbility)}
+                                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all border ${newCardSpecialAbility === ability ? 'bg-cyan-500 border-cyan-400 text-black' : 'bg-black/40 border-white/5 text-zinc-500 hover:border-white/10'}`}
+                                        >
+                                            {ability}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Ratings */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-3">
+                                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Power Level (10)</label>
+                                    <div className="flex items-center gap-3 bg-black/40 p-3 rounded-2xl border border-white/5">
+                                        <input 
+                                            type="range" min="0" max="10" step="1"
+                                            value={newCardRating10}
+                                            onChange={(e) => setNewCardRating10(parseInt(e.target.value) || 0)}
+                                            className="accent-indigo-500 w-full"
+                                        />
+                                        <span className="text-white font-bold text-xs min-w-4">{newCardRating10}</span>
+                                    </div>
+                                </div>
+                                <div className="space-y-3">
+                                    <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Star Tier (5)</label>
+                                    <div className="flex items-center justify-between gap-1 bg-black/40 p-3 rounded-2xl border border-white/5 h-[46px]">
+                                        {[1, 2, 3, 4, 5].map(s => (
+                                            <button key={s} type="button" onClick={() => setNewCardStarRating5(s)} className="group/star">
+                                                <Star className={`w-3.5 h-3.5 transition-colors ${newCardStarRating5 >= s ? 'fill-yellow-400 text-yellow-400' : 'text-zinc-700'}`} />
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Price */}
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Commercial Price</label>
+                                <div className="flex gap-2">
+                                    <div className="relative flex-1">
+                                        <input 
+                                            type="number"
+                                            value={newCardPrice}
+                                            onChange={(e) => setNewCardPrice(parseInt(e.target.value) || 0)}
+                                            className="w-full bg-black/40 border border-white/10 py-3 px-10 rounded-2xl text-white text-md font-bold focus:outline-none focus:border-indigo-500 transition"
+                                        />
+                                        <div className="absolute left-4 top-1/2 -translate-y-1/2">
+                                            {newCardCurrency === 'INR' ? <span className="text-zinc-500 font-bold">₹</span> : <span className="text-zinc-500 font-bold">$</span>}
+                                        </div>
+                                    </div>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setNewCardCurrency(prev => prev === 'INR' ? 'USD' : 'INR')}
+                                        className="px-4 bg-zinc-800 rounded-2xl text-[10px] font-black text-white hover:bg-zinc-700 transition border border-white/5"
+                                    >
+                                        {newCardCurrency}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                {editingCardId && (
+                                    <button 
+                                        type="button"
+                                        onClick={() => {
+                                            setDecks(prev => prev.map(d => d.id === activeDeckId ? { ...d, cards: d.cards.filter(c => c.id !== editingCardId) } : d));
+                                            setIsAddingCard(false);
+                                            setEditingCardId(null);
+                                        }}
+                                        className="flex-1 py-4 rounded-2xl bg-red-500/10 text-red-500 border border-red-500/20 font-black uppercase tracking-widest text-[10px] hover:bg-red-500/20 transition"
+                                    >
+                                        Discard Card
+                                    </button>
+                                )}
+                                <button 
+                                    type="submit" 
+                                    disabled={!newCardImage}
+                                    className="flex-[2] py-4 rounded-2xl bg-indigo-500 text-white font-black uppercase tracking-[0.2em] text-[10px] hover:bg-indigo-400 disabled:opacity-50 transition shadow-xl shadow-indigo-500/20"
+                                >
+                                    {editingCardId ? 'Save Changes' : 'Forge Card'}
+                                </button>
+                            </div>
+                        </div>
+                    </form>
                 </motion.div>
             </motion.div>
         )}
@@ -1868,6 +2925,83 @@ const App: React.FC = () => {
                     </div>
                 </motion.div>
             </motion.div>
+        )}
+        {showDriveImport && (
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="fixed inset-0 z-[9000] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <motion.div initial={{scale:0.95, y:20}} animate={{scale:1, y:0}} exit={{scale:0.95, y:20}} className="bg-zinc-900 border border-white/10 p-6 md:p-8 rounded-3xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl relative">
+              <button onClick={() => setShowDriveImport(false)} className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white rounded-full hover:bg-white/10 transition z-10">
+                <X className="w-5 h-5"/>
+              </button>
+              <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><Cloud className="w-6 h-6 text-green-400"/> Google Drive</h2>
+              
+              {!googleUser ? (
+                <div className="flex flex-col items-center justify-center flex-1 py-12 text-center">
+                  <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center text-white/50 mb-6 transition-transform hover:scale-110">
+                    <Cloud className="w-10 h-10" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white mb-2">Connect Google Drive</h3>
+                  <p className="text-zinc-400 max-w-sm mx-auto mb-8">Sign in with your Google account to access and import your photos directly into the vault.</p>
+                  <button onClick={handleGoogleLogin} className="flex items-center gap-3 bg-white text-black px-6 py-3 rounded-full font-bold hover:bg-zinc-200 transition shadow-lg hover:shadow-xl">
+                     <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                     Sign in with Google
+                  </button>
+                  {driveError && <p className="text-red-400 text-sm mt-4 font-medium">{driveError}</p>}
+                </div>
+              ) : (
+                <div className="flex flex-col flex-1 min-h-0">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
+                     <p className="text-zinc-400 text-sm flex items-center gap-2">
+                       <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                       Signed in as <span className="text-white font-medium">{googleUser.email}</span>
+                     </p>
+                     <button onClick={() => { auth.signOut(); sessionStorage.removeItem('google_access_token'); setDriveImages([]); }} className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition self-end sm:self-auto uppercase tracking-widest font-bold">Sign out</button>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto min-h-[300px] border border-white/10 rounded-2xl bg-black/50 overflow-hidden relative">
+                     {isFetchingDriveImages && driveImages.length === 0 ? (
+                       <div className="flex items-center justify-center h-full text-zinc-500 flex-col gap-3">
+                         <Loader2 className="w-8 h-8 animate-spin text-green-400" />
+                         <p>Loading your Drive images...</p>
+                       </div>
+                     ) : driveError ? (
+                       <div className="flex items-center justify-center h-full text-red-400 font-medium text-center p-6 bg-red-500/5">
+                         {driveError}
+                       </div>
+                     ) : driveImages.length === 0 ? (
+                       <div className="flex items-center justify-center h-full text-zinc-500 p-6 flex-col gap-3">
+                         <Search className="w-8 h-8 opacity-50" />
+                         <p>No images found in your Google Drive.</p>
+                       </div>
+                     ) : (
+                       <div className="absolute inset-0 p-3 lg:p-4 overflow-y-auto custom-scrollbar">
+                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                           {driveImages.map(file => (
+                             <div key={file.id} onClick={() => handleSelectDriveImage(file)} className="aspect-square rounded-xl overflow-hidden border border-white/5 relative group cursor-pointer hover:border-green-400 hover:shadow-[0_0_15px_rgba(74,222,128,0.3)] transition-all">
+                                <img src={file.thumbnailLink} alt={file.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
+                                   <Plus className="w-10 h-10 text-white drop-shadow-xl transform scale-50 group-hover:scale-100 transition-transform duration-300" />
+                                </div>
+                             </div>
+                           ))}
+                         </div>
+                         {driveNextToken && (
+                           <div className="flex justify-center mt-6 mb-2">
+                              <button onClick={() => {
+                                  const token = sessionStorage.getItem('google_access_token');
+                                  if (token) fetchDriveImages(token, driveNextToken);
+                              }} disabled={isFetchingDriveImages} className="px-6 py-2.5 bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white rounded-full text-sm font-semibold transition border border-white/10">
+                                 {isFetchingDriveImages ? <Loader2 className="w-4 h-4 animate-spin inline-block mr-2" /> : null}
+                                 {isFetchingDriveImages ? 'Loading...' : 'Load More Options'}
+                              </button>
+                           </div>
+                         )}
+                       </div>
+                     )}
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
