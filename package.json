@@ -16,6 +16,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "firebase": "^12.13.0",
+    "jszip": "^3.10.1",
     "motion": "^12.38.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

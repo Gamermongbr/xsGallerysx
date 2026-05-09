@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
+import JSZip from 'jszip';
 import { v4 as uuidv4 } from 'uuid';
 import { motion, AnimatePresence } from 'motion/react';
-import { Lock, Unlock, ShieldAlert, Heart, X, Plus, Trash2, Edit2, ChevronLeft, ChevronRight, Image as ImageIcon, Crosshair, Star, Search, MessageCircle, ZoomIn, ZoomOut, Expand, Link as LinkIcon, Upload, LayoutGrid, FolderArchive, User, BadgeCheck, Gamepad2, Coins, Trophy, CreditCard, Cloud, Loader2 } from 'lucide-react';
+import { Lock, Unlock, ShieldAlert, Heart, X, Plus, Trash2, Edit2, ChevronLeft, ChevronRight, Image as ImageIcon, Crosshair, Star, Search, MessageCircle, ZoomIn, ZoomOut, Expand, Link as LinkIcon, Upload, LayoutGrid, FolderArchive, User, BadgeCheck, Gamepad2, Coins, Trophy, CreditCard, Cloud, Loader2, Archive, RotateCw } from 'lucide-react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -35,6 +36,7 @@ interface Image {
   comments?: Comment[];
   isGeneratingComments?: boolean;
   featureTags?: FeatureTag[];
+  originZipId?: string;
 }
 
 interface Section {
@@ -51,6 +53,13 @@ interface Profile {
   glow?: string;
   profileImage?: string;
   isVerified?: boolean;
+}
+
+interface ZipArchive {
+  id: string;
+  name: string;
+  fileCount: number;
+  addedAt: number;
 }
 
 // --- Card Game Types ---
@@ -451,26 +460,95 @@ const App: React.FC = () => {
         };
     });
   };
-  const [decks, setDecks] = useState<CardDeck[]>(() => {
+  // Persistence: Load from IndexedDB
+  const [sections, setSections] = useState<Section[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [decks, setDecks] = useState<CardDeck[]>([]);
+  const [zipArchives, setZipArchives] = useState<ZipArchive[]>([]);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+
+  // IndexedDB Helper
+  const openDB = (): Promise<IDBDatabase> => {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('xslocksx_db', 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains('app_data')) {
+          db.createObjectStore('app_data');
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  };
+
+  const saveData = async (key: string, data: any) => {
     try {
-      const saved = localStorage.getItem('xlockx_decks');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
+      const db = await openDB();
+      const tx = db.transaction('app_data', 'readwrite');
+      tx.objectStore('app_data').put(data, key);
+      return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (err) {
+      console.error(`Error saving ${key} to IndexedDB`, err);
     }
-  });
+  };
+
+  const loadData = async (key: string) => {
+    try {
+      const db = await openDB();
+      const tx = db.transaction('app_data', 'readonly');
+      const request = tx.objectStore('app_data').get(key);
+      return new Promise<any>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (err) {
+      console.error(`Error loading ${key} from IndexedDB`, err);
+      return null;
+    }
+  };
+
+  // Initial Data Loading
+  useEffect(() => {
+    const init = async () => {
+      const savedSections = await loadData('sections');
+      const savedProfiles = await loadData('profiles');
+      const savedDecks = await loadData('decks');
+      const savedZips = await loadData('zips');
+
+      if (savedSections) setSections(savedSections);
+      if (savedProfiles) setProfiles(savedProfiles);
+      if (savedDecks) setDecks(savedDecks);
+      if (savedZips) setZipArchives(savedZips);
+      
+      setIsDataLoaded(true);
+    };
+    init();
+  }, []);
+
+  // Save on change
+  useEffect(() => {
+    if (isDataLoaded) saveData('sections', sections);
+  }, [sections, isDataLoaded]);
+
+  useEffect(() => {
+    if (isDataLoaded) saveData('profiles', profiles);
+  }, [profiles, isDataLoaded]);
+
+  useEffect(() => {
+    if (isDataLoaded) saveData('decks', decks);
+  }, [decks, isDataLoaded]);
+
+  useEffect(() => {
+    if (isDataLoaded) saveData('zips', zipArchives);
+  }, [zipArchives, isDataLoaded]);
+
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [isEditingCards, setIsEditingCards] = useState(false);
   const cardBuilderInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('xlockx_decks', JSON.stringify(decks));
-    } catch (e) {
-      console.error("Failed to save decks to localStorage", e);
-      // If we hit quota, we might want to alert the user or try to prune.
-    }
-  }, [decks]);
 
   const activeDeck = decks.find(d => d.id === activeDeckId);
 
@@ -485,52 +563,19 @@ const App: React.FC = () => {
   const [newCardPrice, setNewCardPrice] = useState(0);
   const [newCardCurrency, setNewCardCurrency] = useState<Currency>('INR');
 
-  // Persistence: Load from localStorage
-  const [sections, setSections] = useState<Section[]>(() => {
-    try {
-      const saved = localStorage.getItem('xlockx_sections');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [profiles, setProfiles] = useState<Profile[]>(() => {
-    try {
-      const saved = localStorage.getItem('xlockx_profiles');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  // Save to localStorage whenever collections change
-  useEffect(() => {
-    try {
-      localStorage.setItem('xlockx_sections', JSON.stringify(sections));
-    } catch (err) {
-      console.warn("Could not save sections to localStorage", err);
-    }
-  }, [sections]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('xlockx_profiles', JSON.stringify(profiles));
-    } catch (err) {
-      console.warn("Could not save profiles to localStorage", err);
-    }
-  }, [profiles]);
-
   const [selectedImageInfo, setSelectedImageInfo] = useState<{ image: Image; profileId?: string; sectionId?: string; index: number } | null>(null);
+  const [focusedView, setFocusedView] = useState<{ type: 'section' | 'profile'; id: string } | null>(null);
   const [isFullScreenImage, setIsFullScreenImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const profileImageInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
   const [activeAddImageSectionId, setActiveAddImageSectionId] = useState<string | null>(null);
   const [activeAddImageProfileId, setActiveAddImageProfileId] = useState<string | null>(null);
   const [newImageUrl, setNewImageUrl] = useState('');
   
   // Google Drive integration states
   const [showDriveImport, setShowDriveImport] = useState(false);
+  const [showStorageDetail, setShowStorageDetail] = useState(false);
   const [googleUser, setGoogleUser] = useState<FirebaseUser | null>(null);
   const [driveImages, setDriveImages] = useState<any[]>([]);
   const [isFetchingDriveImages, setIsFetchingDriveImages] = useState(false);
@@ -731,6 +776,14 @@ const App: React.FC = () => {
   const modalImageRef = useRef<HTMLImageElement>(null);
   
   const [hearts, setHearts] = useState<{id: string; side?: 'left' | 'right'}[]>([]);
+  const [isGameRotated, setIsGameRotated] = useState(false);
+  const [viewport, setViewport] = useState({ w: typeof window !== 'undefined' ? window.innerWidth : 0, h: typeof window !== 'undefined' ? window.innerHeight : 0 });
+
+  useEffect(() => {
+    const handleResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
   const [isEditingPoints, setIsEditingPoints] = useState(false);
   const [activeTagId, setActiveTagId] = useState<string | null>(null);
   const [tempTags, setTempTags] = useState<FeatureTag[]>([]);
@@ -934,6 +987,72 @@ const App: React.FC = () => {
       }
     }
     if (event.target) event.target.value = ''; 
+  };
+
+  const handleZipUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file && (activeAddImageProfileId || activeAddImageSectionId)) {
+      setIsFetchingDriveImages(true);
+      try {
+        const jszip = new JSZip();
+        const contents = await jszip.loadAsync(file);
+        
+        const imageEntries = Object.values(contents.files).filter(f => 
+          !f.dir && f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+        );
+
+        if (imageEntries.length === 0) {
+          alert("No images found in the ZIP file.");
+          return;
+        }
+
+        const newImages: Image[] = [];
+        const zipId = uuidv4();
+        for (const entry of imageEntries) {
+          const blob = await entry.async('blob');
+          const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+          
+          newImages.push({
+            id: uuidv4(),
+            src: base64,
+            alt: entry.name,
+            rating: 0,
+            comments: getRandomFallbackComments(),
+            featureTags: [],
+            originZipId: zipId,
+          });
+        }
+
+        const targetId = activeAddImageProfileId || activeAddImageSectionId;
+        const isProfile = !!activeAddImageProfileId;
+
+        if (isProfile) {
+          setProfiles(prev => prev.map(p => p.id === targetId ? { ...p, images: [...p.images, ...newImages] } : p));
+        } else {
+          setSections(prev => prev.map(s => s.id === targetId ? { ...s, images: [...s.images, ...newImages] } : s));
+        }
+
+        setZipArchives(prev => [...prev, {
+          id: zipId,
+          name: file.name,
+          fileCount: imageEntries.length,
+          addedAt: Date.now()
+        }]);
+
+      } catch (err) {
+        console.error("ZIP processing error", err);
+        alert("Error processing ZIP file. It might be too large.");
+      } finally {
+        setIsFetchingDriveImages(false);
+        setActiveAddImageProfileId(null);
+        setActiveAddImageSectionId(null);
+        if (event.target) event.target.value = '';
+      }
+    }
   };
 
   const handleAddCardFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1242,7 +1361,127 @@ const App: React.FC = () => {
       )}
 
       <main className="max-w-7xl mx-auto px-6 pb-32">
-        {activeTab === 'home' && (
+        {focusedView && (
+           <motion.div initial={{opacity:0, x: 20}} animate={{opacity:1, x:0}} exit={{opacity:0, x:-20}} className="space-y-12 py-6">
+              <button 
+                onClick={() => setFocusedView(null)}
+                className="flex items-center gap-2 text-zinc-500 hover:text-white transition group px-4 py-2 rounded-full hover:bg-white/5 border border-transparent hover:border-white/10"
+              >
+                  <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+                  <span className="text-[10px] font-black uppercase tracking-widest">Back to Dashboard</span>
+              </button>
+
+              {focusedView.type === 'section' ? (
+                (() => {
+                  const section = sections.find(s => s.id === focusedView.id);
+                  if (!section) { setFocusedView(null); return null; }
+                  return (
+                    <div className="space-y-10">
+                      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-10 border-b border-white/5">
+                        <div className="space-y-2">
+                          <p className="text-[10px] text-cyan-400 font-black uppercase tracking-[0.4em]">Section Gallery</p>
+                          <h2 className="text-5xl font-black text-white tracking-tighter uppercase">{section.name}</h2>
+                          <p className="text-zinc-500 text-sm font-medium">{section.images.length} Captured Items</p>
+                        </div>
+                        <button 
+                          onClick={() => setActiveAddImageSectionId(section.id)}
+                          className="px-8 py-4 bg-cyan-400 text-black rounded-3xl text-xs font-black uppercase tracking-widest hover:bg-cyan-300 transition shadow-[0_10px_30px_rgba(34,211,238,0.2)] flex items-center gap-2 w-fit"
+                        >
+                          <Plus className="w-4 h-4" /> Add Item
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                        {section.images.map((image, i) => (
+                           <motion.div
+                              key={image.id}
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={{ delay: i * 0.05 }}
+                              onClick={() => handleImageClick(image, section.id, 'section')}
+                              className="group relative aspect-[3/4.5] bg-zinc-900 border border-white/5 rounded-3xl overflow-hidden cursor-zoom-in hover:border-cyan-400/30 transition-all duration-500 shadow-2xl"
+                            >
+                              <img src={image.src} alt={image.alt} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setImageToDelete({ sectionId: section.id, imageId: image.id, alt: image.alt }); }}
+                                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/60 hover:bg-red-500 text-white backdrop-blur-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all border border-white/10"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                           </motion.div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : (
+                (() => {
+                  const profile = profiles.find(p => p.id === focusedView.id);
+                  if (!profile) { setFocusedView(null); return null; }
+                  return (
+                    <div className="space-y-10">
+                      <div className="flex flex-col md:flex-row items-center md:items-end justify-between gap-8 pb-12 border-b border-white/5">
+                        <div className="flex flex-col md:flex-row items-center gap-8">
+                          <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white/10 shadow-2xl relative group">
+                            <img src={profile.profileImage || 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?auto=format&fit=crop&q=80&w=200'} className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 ring-4 ring-inset ring-white/10 rounded-full" />
+                          </div>
+                          <div className="text-center md:text-left space-y-3">
+                            <div className="flex items-center justify-center md:justify-start gap-3">
+                              <h2 className="text-5xl font-black text-white tracking-tighter uppercase">{profile.name}</h2>
+                              {profile.isVerified && <BadgeCheck className="w-8 h-8 text-cyan-400 fill-cyan-400/10" />}
+                            </div>
+                            <div className="flex items-center justify-center md:justify-start gap-6">
+                              <div className="flex flex-col">
+                                <span className="text-xl font-bold text-white tracking-widest">{profile.images.length}</span>
+                                <span className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">Posts</span>
+                              </div>
+                              <div className="w-px h-8 bg-white/10" />
+                              <div className="flex flex-col">
+                                <span className="text-xl font-bold text-cyan-400 tracking-widest uppercase">Elite</span>
+                                <span className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">Status</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => setActiveAddImageProfileId(profile.id)}
+                          className="px-8 py-4 bg-white text-black rounded-3xl text-xs font-black uppercase tracking-widest hover:bg-cyan-400 transition shadow-[0_10px_30px_rgba(255,255,255,0.1)] flex items-center gap-2"
+                        >
+                          <Plus className="w-4 h-4" /> Upload Content
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                        {profile.images.map((image, i) => (
+                           <motion.div
+                              key={image.id}
+                              initial={{ opacity: 0, scale: 0.9 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              transition={{ delay: i * 0.05 }}
+                              onClick={() => handleImageClick(image, profile.id, 'profile')}
+                              className="group relative aspect-[3/4.5] bg-zinc-900 border border-white/5 rounded-3xl overflow-hidden cursor-zoom-in hover:border-cyan-400/30 transition-all duration-500 shadow-2xl"
+                            >
+                              <img src={image.src} alt={image.alt} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setImageToDelete({ profileId: profile.id, imageId: image.id, alt: image.alt }); }}
+                                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/60 hover:bg-red-500 text-white backdrop-blur-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all border border-white/10"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                           </motion.div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
+           </motion.div>
+        )}
+
+        {activeTab === 'home' && !focusedView && (
            <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="space-y-16">
              <div className="flex justify-between items-center mb-10">
                 <h2 className="text-sm font-bold text-zinc-500 uppercase tracking-[0.4em]">Vault Sections</h2>
@@ -1271,8 +1510,16 @@ const App: React.FC = () => {
                       className={`relative bg-zinc-900/40 border border-white/10 rounded-[32px] p-8 pb-10 transition-all duration-500 hover:bg-zinc-900/60 ${section.glow ? `glow-${section.glow}` : ''}`}
                     >
                       <div className="flex items-center justify-between mb-8 gap-6 border-b border-white/10 pb-6">
-                        <div>
-                          <h2 className="text-3xl font-semibold text-white tracking-tight">{section.name}</h2>
+                        <div 
+                          className="cursor-pointer group/title"
+                          onClick={() => setFocusedView({ type: 'section', id: section.id })}
+                        >
+                          <div className="flex items-center gap-3">
+                            <h2 className="text-3xl font-semibold text-white tracking-tight group-hover/title:text-cyan-400 transition-colors">{section.name}</h2>
+                            <div className="opacity-0 group-hover/title:opacity-100 transition-opacity translate-x-[-10px] group-hover/title:translate-x-0 transition-all">
+                              <ChevronRight className="w-5 h-5 text-cyan-400" />
+                            </div>
+                          </div>
                           <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{section.images.length} Images</span>
                         </div>
                         <div className="flex gap-2">
@@ -1291,28 +1538,40 @@ const App: React.FC = () => {
                       {section.images.length === 0 ? (
                         <div className="py-12 text-center text-zinc-500">Empty section</div>
                       ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-6">
-                           <AnimatePresence>
-                              {section.images.map((image, i) => (
-                                <motion.div
-                                  key={image.id}
-                                  layout
-                                  initial={{ opacity: 0, scale: 0.9 }}
-                                  animate={{ opacity: 1, scale: 1 }}
-                                  exit={{ opacity: 0, scale: 0.8 }}
-                                  onClick={() => handleImageClick(image, section.id, 'section')}
-                                  className="group relative aspect-[3/4] bg-white/5 rounded-2xl overflow-hidden cursor-pointer border border-white/5 hover:border-white/20 transition-all"
-                                >
-                                  <img src={image.src} alt={image.alt} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); setImageToDelete({ sectionId: section.id, imageId: image.id, alt: image.alt }); }}
-                                    className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 hover:bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+                        <div className="space-y-8">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-6">
+                             <AnimatePresence>
+                                {section.images.slice(0, 4).map((image, i) => (
+                                  <motion.div
+                                    key={image.id}
+                                    layout
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.8 }}
+                                    onClick={() => handleImageClick(image, section.id, 'section')}
+                                    className="group relative aspect-[3/4] bg-white/5 rounded-2xl overflow-hidden cursor-pointer border border-white/5 hover:border-white/20 transition-all font-inter"
                                   >
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                </motion.div>
-                              ))}
-                           </AnimatePresence>
+                                    <img src={image.src} alt={image.alt} className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); setImageToDelete({ sectionId: section.id, imageId: image.id, alt: image.alt }); }}
+                                      className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 hover:bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </motion.div>
+                                ))}
+                             </AnimatePresence>
+                          </div>
+                          
+                          {section.images.length > 4 && (
+                            <button 
+                              onClick={() => setFocusedView({ type: 'section', id: section.id })}
+                              className="w-full py-4 rounded-2xl bg-zinc-800/50 border border-white/5 text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all flex items-center justify-center gap-3 group"
+                            >
+                              Explore all {section.images.length} captures
+                              <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                            </button>
+                          )}
                         </div>
                       )}
                     </motion.section>
@@ -1322,7 +1581,7 @@ const App: React.FC = () => {
            </motion.div>
         )}
 
-        {activeTab === 'profiles' && (
+        {activeTab === 'profiles' && !focusedView && (
            <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>
              <div className="flex justify-between items-center mb-10">
                 <h2 className="text-sm font-bold text-zinc-500 uppercase tracking-[0.4em]">Personal Profiles</h2>
@@ -1346,7 +1605,8 @@ const App: React.FC = () => {
                         <motion.div 
                           key={p.id}
                           whileHover={{ y: -5 }}
-                          className={`group relative min-h-[300px] rounded-[40px] p-8 border border-white/5 bg-zinc-900/40 hover:bg-zinc-900/60 transition-all duration-500 shadow-2xl overflow-hidden ${p.glow ? `glow-${p.glow}` : ''}`}
+                          onClick={() => setFocusedView({ type: 'profile', id: p.id })}
+                          className={`group relative min-h-[350px] rounded-[40px] p-8 border border-white/5 bg-zinc-900/40 hover:bg-zinc-900/60 transition-all duration-500 shadow-2xl overflow-hidden cursor-pointer ${p.glow ? `glow-${p.glow}` : ''}`}
                         >
                             {/* Header Section */}
                             <div className="flex justify-between items-start mb-10">
@@ -1356,7 +1616,7 @@ const App: React.FC = () => {
                                      </div>
                                      <div className="flex flex-col">
                                          <div className="flex items-center gap-1.5">
-                                            <h3 className="text-2xl font-bold text-white tracking-tight leading-none">{p.name}</h3>
+                                            <h3 className="text-2xl font-bold text-white tracking-tight leading-none group-hover:text-cyan-400 transition-colors">{p.name}</h3>
                                             {p.isVerified && <BadgeCheck className="w-5 h-5 text-cyan-400 fill-cyan-400/10" />}
                                          </div>
                                          <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-[0.2em] mt-2">{p.images.length} Images</p>
@@ -1368,16 +1628,24 @@ const App: React.FC = () => {
                             </div>
 
                             {/* Middle/Previews Section */}
-                            <div className="flex-1">
+                            <div className="flex-1 space-y-6">
                                 {p.images.length > 0 ? (
-                                    <div className="grid grid-cols-4 gap-3">
-                                        {p.images.slice(0, 4).map(img => (
-                                            <div key={img.id} onClick={(e) => { e.stopPropagation(); handleImageClick(img, p.id, 'profile'); }} className="aspect-square rounded-2xl overflow-hidden border border-white/10 cursor-zoom-in relative group/img">
-                                                <img src={img.src} className="w-full h-full object-cover group-hover/img:scale-110 transition-transform duration-500" />
-                                                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover/img:opacity-100 transition-opacity" />
+                                    <>
+                                        <div className="grid grid-cols-4 gap-3">
+                                            {p.images.slice(0, 4).map(img => (
+                                                <div key={img.id} onClick={(e) => { e.stopPropagation(); handleImageClick(img, p.id, 'profile'); }} className="aspect-square rounded-2xl overflow-hidden border border-white/10 cursor-zoom-in relative group/img">
+                                                    <img src={img.src} className="w-full h-full object-cover group-hover/img:scale-110 transition-transform duration-500" />
+                                                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover/img:opacity-100 transition-opacity" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                        {p.images.length > 4 && (
+                                            <div className="w-full py-3 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center gap-2 group-hover:bg-cyan-400/10 group-hover:border-cyan-400/30 transition-all">
+                                                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 group-hover:text-cyan-400 Transition-colors">Explore Collection</span>
+                                                <ChevronRight className="w-3 h-3 text-zinc-500 group-hover:text-cyan-400 transition-all group-hover:translate-x-1" />
                                             </div>
-                                        ))}
-                                    </div>
+                                        )}
+                                    </>
                                 ) : (
                                     <div className="h-24 flex items-center justify-center border border-dashed border-white/5 rounded-2xl">
                                         <p className="text-xs text-zinc-600 font-bold uppercase tracking-widest">No Content</p>
@@ -2034,19 +2302,61 @@ const App: React.FC = () => {
                                  </div>
                                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.4em] mt-2">Pick your Fav</p>
                              </div>
+                             <div className="flex gap-2 items-center">
+                                 <button 
+                                     onClick={() => setIsGameRotated(!isGameRotated)}
+                                     className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isGameRotated ? 'bg-cyan-400 text-black rotate-180' : 'bg-white/5 text-zinc-500 hover:text-white border border-white/10'}`}
+                                     title="Rotate Screen"
+                                 >
+                                     <RotateCw className="w-4 h-4" />
+                                 </button>
+                             </div>
                              <div className="w-32 hidden md:block" />
                         </div>
 
-                        <div className="w-full flex flex-col md:flex-row items-center justify-center gap-8 md:gap-4 relative">
+                        <div className={`w-full flex items-center justify-center relative transition-all duration-700 ${isGameRotated ? 'md:rotate-0' : ''}`}
+                             style={isGameRotated && viewport.w < 768 ? {
+                                 position: 'fixed',
+                                 inset: 0,
+                                 zIndex: 1000,
+                                 background: '#050505',
+                                 display: 'flex',
+                                 flexDirection: 'row',
+                                 alignItems: 'center',
+                                 justifyContent: 'center',
+                                 gap: '1rem',
+                                 transform: `rotate(90deg)`,
+                                 width: `${viewport.h}px`,
+                                 height: `${viewport.w}px`,
+                                 top: '50%',
+                                 left: '50%',
+                                 marginTop: `-${viewport.w / 2}px`,
+                                 marginLeft: `-${viewport.h / 2}px`,
+                                 padding: '1rem'
+                             } : {}}>
+                            {/* Rotation close for mobile */}
+                            {isGameRotated && viewport.w < 768 && (
+                                <button 
+                                    onClick={() => setIsGameRotated(false)}
+                                    className="absolute top-4 left-4 z-[1001] w-12 h-12 rounded-full bg-white/10 flex items-center justify-center text-white"
+                                    style={{ transform: 'rotate(-90deg)' }}
+                                >
+                                    <X className="w-6 h-6" />
+                                </button>
+                            )}
+
                             {/* Left Side */}
                             <motion.div 
                                 key={`left-${wyrImages?.left.id}`}
                                 initial={{ opacity: 0, scale: 0.9 }}
                                 animate={{ opacity: 1, scale: 1 }}
-                                className="flex-1 w-full max-w-sm"
+                                className={`flex-1 w-full flex flex-col gap-4 ${isGameRotated ? 'max-w-[40%]' : 'max-w-sm'}`}
                             >
-                                <div className="flex flex-col gap-6">
-                                    <div className="relative aspect-[3/4.5] rounded-[40px] overflow-hidden border border-white/10 shadow-2xl transition-all duration-500 group flex items-center justify-center">
+                                <div className="flex flex-col gap-4">
+                                    <div 
+                                        onClick={() => selectWYRWinner('left')}
+                                        className={`relative rounded-[30px] overflow-hidden border border-white/10 shadow-2xl transition-all duration-500 group flex items-center justify-center cursor-pointer active:scale-95 ${isGameRotated ? 'aspect-[3/4]' : 'aspect-[3/4.5]'}`}
+                                    >
                                         <img src={wyrImages?.left.src} className="absolute inset-0 w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" />
                                         <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
                                         
@@ -2056,21 +2366,14 @@ const App: React.FC = () => {
                                             </motion.div>
                                         ))}
                                     </div>
-                                    <button 
-                                        onClick={() => selectWYRWinner('left')}
-                                        className="w-full py-5 rounded-3xl bg-white text-black font-black uppercase tracking-[0.2em] text-xs hover:bg-cyan-400 transition-all shadow-[0_10px_30px_rgba(0,0,0,0.5)] active:scale-95 flex items-center justify-center gap-3 border-b-4 border-black/20"
-                                    >
-                                        <Heart className="w-4 h-4" />
-                                        Smash Left
-                                    </button>
                                 </div>
                             </motion.div>
 
                             {/* Versus Badge */}
-                            <div className="z-10 shrink-0 mx-2">
-                                <div className="bg-black/80 backdrop-blur-3xl border border-white/10 w-16 h-16 md:w-20 md:h-20 rounded-full flex flex-col items-center justify-center shadow-2xl relative">
+                            <div className={`z-10 shrink-0 mx-1 md:mx-2 ${isGameRotated ? 'scale-75 md:scale-100' : ''}`}>
+                                <div className="bg-black/80 backdrop-blur-3xl border border-white/10 w-12 h-12 md:w-20 md:h-20 rounded-full flex flex-col items-center justify-center shadow-2xl relative">
                                     <div className="absolute inset-0 rounded-full bg-cyan-500/20 blur-xl animate-pulse" />
-                                    <span className="text-[10px] md:text-xs font-black text-zinc-500 uppercase tracking-widest relative">VS</span>
+                                    <span className="text-[8px] md:text-xs font-black text-zinc-500 uppercase tracking-widest relative">VS</span>
                                 </div>
                             </div>
 
@@ -2079,10 +2382,13 @@ const App: React.FC = () => {
                                 key={`right-${wyrImages?.right.id}`}
                                 initial={{ opacity: 0, scale: 0.9 }}
                                 animate={{ opacity: 1, scale: 1 }}
-                                className="flex-1 w-full max-w-sm"
+                                className={`flex-1 w-full flex flex-col gap-4 ${isGameRotated ? 'max-w-[40%]' : 'max-w-sm'}`}
                             >
-                                <div className="flex flex-col gap-6">
-                                    <div className="relative aspect-[3/4.5] rounded-[40px] overflow-hidden border border-white/10 shadow-2xl transition-all duration-500 group flex items-center justify-center">
+                                <div className="flex flex-col gap-4">
+                                    <div 
+                                        onClick={() => selectWYRWinner('right')}
+                                        className={`relative rounded-[30px] overflow-hidden border border-white/10 shadow-2xl transition-all duration-500 group flex items-center justify-center cursor-pointer active:scale-95 ${isGameRotated ? 'aspect-[3/4]' : 'aspect-[3/4.5]'}`}
+                                    >
                                         <img src={wyrImages?.right.src} className="absolute inset-0 w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" />
                                         <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent pointer-events-none" />
                                         
@@ -2092,13 +2398,6 @@ const App: React.FC = () => {
                                             </motion.div>
                                         ))}
                                     </div>
-                                    <button 
-                                        onClick={() => selectWYRWinner('right')}
-                                        className="w-full py-5 rounded-3xl bg-white text-black font-black uppercase tracking-[0.2em] text-xs hover:bg-rose-500 hover:text-white transition-all shadow-[0_10px_30px_rgba(0,0,0,0.5)] active:scale-95 flex items-center justify-center gap-3 border-b-4 border-black/20"
-                                    >
-                                        <Heart className="w-4 h-4" />
-                                        Smash Right
-                                    </button>
                                 </div>
                             </motion.div>
                         </div>
@@ -2153,49 +2452,140 @@ const App: React.FC = () => {
                         </div>
                         <span className="text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full bg-white/10 text-white">Open</span>
                     </button>
+
+                    <button 
+                        onClick={() => setShowStorageDetail(true)}
+                        className="bg-zinc-900 border border-white/5 p-5 rounded-3xl flex items-center justify-between hover:border-white/20 hover:bg-white/5 transition text-left group"
+                    >
+                        <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-full bg-cyan-500/10 flex items-center justify-center shrink-0">
+                                <Archive className="w-6 h-6 text-cyan-400" />
+                            </div>
+                            <div>
+                                <h4 className="text-white font-medium group-hover:text-white transition">Manage Storage</h4>
+                                <p className="text-xs text-zinc-500 mt-1">Manage ZIP archives and vault space</p>
+                            </div>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-zinc-500 group-hover:text-white transition-all transform group-hover:translate-x-1" />
+                    </button>
+
+                    {/* ZIP Archive Management (Condensed in Storage Detail) */}
+                    <AnimatePresence>
+                        {showStorageDetail && (
+                            <motion.div 
+                                initial={{ opacity: 0, x: 20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: -20 }}
+                                className="fixed inset-0 z-[6000] bg-[#050505] p-6 pt-20"
+                            >
+                                <div className="max-w-md mx-auto space-y-8 text-center">
+                                    <button 
+                                        onClick={() => setShowStorageDetail(false)}
+                                        className="flex items-center gap-2 text-zinc-500 hover:text-white transition group mb-8"
+                                    >
+                                        <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
+                                        <span className="text-[10px] font-black uppercase tracking-widest">Back to Settings</span>
+                                    </button>
+
+                                    <div>
+                                        <h2 className="text-3xl font-bold text-white mb-2">Storage Vault</h2>
+                                        <p className="text-zinc-500 text-sm">Manage your uploaded ZIP bundles and extracted assets.</p>
+                                    </div>
+
+                                    {zipArchives.length > 0 ? (
+                                        <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+                                            {zipArchives.map(zip => (
+                                                <div key={zip.id} className="bg-zinc-900/50 border border-white/5 p-5 rounded-3xl flex items-center justify-between hover:border-white/10 transition group">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 rounded-2xl bg-yellow-400/10 flex items-center justify-center shrink-0">
+                                                            <Archive className="w-5 h-5 text-yellow-500" />
+                                                        </div>
+                                                        <div className="text-left">
+                                                            <h4 className="text-sm font-bold text-white max-w-[150px] truncate">{zip.name}</h4>
+                                                            <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-black">{zip.fileCount} Items • Created {new Date(zip.addedAt).toLocaleDateString()}</p>
+                                                        </div>
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => {
+                                                            if (confirm(`Are you sure you want to delete this archive? This will remove all ${zip.fileCount} images extracted from "${zip.name}" from your vault.`)) {
+                                                                setProfiles(prev => prev.map(p => ({ ...p, images: p.images.filter(img => img.originZipId !== zip.id) })));
+                                                                setSections(prev => prev.map(s => ({ ...s, images: s.images.filter(img => img.originZipId !== zip.id) })));
+                                                                setZipArchives(prev => prev.filter(z => z.id !== zip.id));
+                                                            }
+                                                        }}
+                                                        className="w-10 h-10 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center group-hover:bg-red-500 group-hover:text-white transition"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="py-20 border border-dashed border-white/10 rounded-[40px]">
+                                            <Archive className="w-12 h-12 text-zinc-700 mx-auto mb-4" />
+                                            <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">No archives stored</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
             </motion.div>
         )}
       </main>
 
                              {/* Floating Bottom Navigation */}
-      {cardGameMode !== 'playing' && (
-          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[5000] w-[320px]">
-              <div className="bg-black/80 backdrop-blur-2xl border border-white/10 rounded-full p-2 flex items-center justify-between shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
-                  {[
-                      { id: 'home', icon: LayoutGrid, label: 'Sections' },
-                      { id: 'profiles', icon: User, label: 'Profiles' },
-                      { id: 'arcade', icon: Gamepad2, label: 'Arcade' },
-                      { id: 'extra', icon: ShieldAlert, label: 'Vault' }
-                  ].map((tab) => (
-                      <button 
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id as any)}
-                        className="relative px-6 py-4 rounded-full transition-all duration-300"
-                      >
-                          {activeTab === tab.id && (
-                              <motion.div 
-                                layoutId="nav-bg"
-                                className="absolute inset-0 bg-white/5 rounded-full"
-                                transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
-                              />
-                          )}
-                          <tab.icon className={`w-6 h-6 relative z-10 transition-colors duration-300 ${activeTab === tab.id ? 'text-cyan-400' : 'text-zinc-500'}`} />
-                          {activeTab === tab.id && (
-                              <motion.div 
-                                layoutId="nav-dot"
-                                className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 bg-cyan-400 rounded-full"
-                              />
-                          )}
-                      </button>
-                  ))}
-              </div>
-          </div>
-      )}
+      <AnimatePresence>
+        {cardGameMode !== 'playing' && !(isGameRotated && viewport.w < 768) && (
+            <motion.div 
+                initial={{ y: 100, opacity: 0, x: '-50%' }}
+                animate={{ y: 0, opacity: 1, x: '-50%' }}
+                exit={{ y: 100, opacity: 0, x: '-50%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="fixed bottom-8 left-1/2 z-[5000] w-[320px]"
+            >
+                <div className="bg-black/80 backdrop-blur-2xl border border-white/10 rounded-full p-2 flex items-center justify-between shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+                    {[
+                        { id: 'home', icon: LayoutGrid, label: 'Sections' },
+                        { id: 'profiles', icon: User, label: 'Profiles' },
+                        { id: 'arcade', icon: Gamepad2, label: 'Arcade' },
+                        { id: 'extra', icon: ShieldAlert, label: 'Vault' }
+                    ].map((tab) => (
+                        <button 
+                          key={tab.id}
+                          onClick={() => {
+                              setActiveTab(tab.id as any);
+                              setFocusedView(null);
+                              setShowStorageDetail(false);
+                          }}
+                          className="relative px-6 py-4 rounded-full transition-all duration-300"
+                        >
+                            {activeTab === tab.id && (
+                                <motion.div 
+                                  layoutId="nav-bg"
+                                  className="absolute inset-0 bg-white/5 rounded-full"
+                                  transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+                                />
+                            )}
+                            <tab.icon className={`w-6 h-6 relative z-10 transition-colors duration-300 ${activeTab === tab.id ? 'text-cyan-400' : 'text-zinc-500'}`} />
+                            {activeTab === tab.id && (
+                                <motion.div 
+                                  layoutId="nav-dot"
+                                  className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 bg-cyan-400 rounded-full"
+                                />
+                            )}
+                        </button>
+                    ))}
+                </div>
+            </motion.div>
+        )}
+      </AnimatePresence>
 
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
       <input type="file" ref={profileImageInputRef} onChange={handleProfileImageChange} className="hidden" accept="image/*" />
       <input type="file" ref={cardBuilderInputRef} onChange={handleAddCardFileChange} className="hidden" accept="image/*" />
+      <input type="file" ref={zipInputRef} onChange={handleZipUpload} className="hidden" accept=".zip" />
 
       {/* --- Image Viewer Modal --- */}
       <AnimatePresence>
@@ -2739,6 +3129,16 @@ const App: React.FC = () => {
                            <div className="text-left">
                                <h3 className="text-white font-medium">Upload from Device</h3>
                                <p className="text-zinc-400 text-sm">Select a file from your local storage</p>
+                           </div>
+                       </button>
+
+                       <button onClick={() => zipInputRef.current?.click()} className="flex items-center gap-4 p-4 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-yellow-400/50 transition group">
+                           <div className="w-12 h-12 rounded-full bg-yellow-400/20 text-yellow-400 flex items-center justify-center group-hover:scale-110 transition shrink-0">
+                               <Archive className="w-6 h-6"/>
+                           </div>
+                           <div className="text-left">
+                               <h3 className="text-white font-medium">Upload ZIP Bundle</h3>
+                               <p className="text-zinc-400 text-sm">Extract all images from a .zip file</p>
                            </div>
                        </button>
 
